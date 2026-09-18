@@ -1,0 +1,61 @@
+{
+  "name": "jev-browser",
+  "version": "0.1.1",
+  "description": "A browser an agent can hand one outcome at a time, with Jev (TypeSafe System One) choosing every click. As a library, a CLI and an MCP server.",
+  "keywords": [
+    "mcp",
+    "mcp-server",
+    "browser-automation",
+    "playwright",
+    "llm",
+    "agent",
+    "jev",
+    "typesafe",
+    "claude"
+  ],
+  "license": "MIT",
+  "author": "Ibrahim Hajjaj (https://github.com/ibrahimhajjaj)",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ibrahimhajjaj/barq.git"
+  },
+  "homepage": "https://github.com/ibrahimhajjaj/barq#readme",
+  "bugs": {
+    "url": "https://github.com/ibrahimhajjaj/barq/issues"
+  },
+  "type": "module",
+  "main": "./src/index.mjs",
+  "exports": {
+    ".": "./src/index.mjs"
+  },
+  "bin": {
+    "jev-browser": "./bin/jev-browser.mjs",
+    "jev-browser-mcp": "./bin/jev-browser-mcp.mjs"
+  },
+  "files": [
+    "src/",
+    "bin/",
+    "examples/",
+    "README.md",
+    "NOTES.md",
+    "RESULTS.md",
+    "LICENSE",
+    ".env.example"
+  ],
+  "scripts": {
+    "test": "node --test ./test/*.test.mjs",
+    "test:e2e": "node ./test/mcp.e2e.mjs",
+    "bench": "node ./bench/run.mjs",
+    "bench:cost": "node ./bench/context-cost.mjs",
+    "mcp": "node ./bin/jev-browser-mcp.mjs",
+    "setup": "playwright install chromium"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": ">=1.30.0 <2.0.0",
+    "playwright": "^1.63.0",
+    "zod": "^4.6.5"
+  }
+}

@@ -1,0 +1,32 @@
+{
+  "name": "todomvc",
+  "url": "https://demo.playwright.dev/todomvc/#/",
+  "steps": [
+    {
+      "goal": "Add a todo item",
+      "values": {
+        "todo": "buy milk"
+      },
+      "assert": "() => document.querySelectorAll('ul.todo-list li').length === 1"
+    },
+    {
+      "goal": "Add a todo item",
+      "values": {
+        "todo": "walk the dog"
+      },
+      "assert": "() => document.querySelectorAll('ul.todo-list li').length === 2"
+    },
+    {
+      "goal": "Mark the 'buy milk' todo as completed",
+      "assert": "() => Array.from(document.querySelectorAll('ul.todo-list li.completed')).map(node => node.textContent.trim()).join('|') === 'buy milk'"
+    },
+    {
+      "goal": "Show only the completed todos",
+      "assert": "() => String(window.location.hash).includes('completed')"
+    },
+    {
+      "goal": "Clear all completed todos",
+      "assert": "() => document.querySelectorAll('ul.todo-list li').length === 0"
+    }
+  ]
+}
