@@ -3,6 +3,11 @@
 // the actions are replayed without asking Jev, as long as every target can still be found. Where
 // the page differs, replay stops and the normal Jev loop takes over from there. A single Jev
 // question checks the result at the end, so a replay can't claim "done" on its own.
+//
+// The file keeps nothing readable from the pages: element names, surrounding text, addresses and
+// the goal are kept as fingerprints, and replay compares fingerprints taken the same way from the
+// live page. Only tool names, element kinds and the names of the caller's values stay readable.
+import { createHash } from "node:crypto";
 import { mkdirSync, readFileSync, writeFileSync, renameSync } from "node:fs";
 import { homedir } from "node:os";
 import { join, dirname } from "node:path";
@@ -22,22 +27,43 @@ export function place(url) {
 }
 
 export function recipeKey(goal, url, values = {}) {
-  const g = goal.toLowerCase().replace(/\s+/g, " ").trim();
-  return `${place(url)} :: ${g} :: ${Object.keys(values).sort().join(",")}`;
+  return fingerprint(JSON.stringify([place(url), goal.toLowerCase().replace(/\s+/g, " ").trim(), Object.keys(values).sort()]));
+}
+
+// Page text can repeat what was typed (a new todo, a search term). Value contents become {name}
+// before a fingerprint is taken, so a step recorded with one value finds the element that goes
+// with another. Contents shorter than 3 characters are left, they would match all over the text.
+export function maskValues(text, values = {}) {
+  const subs = Object.entries(values).map(([k, v]) => [k, String(v)]).filter(([, v]) => v.length >= 3).sort((a, b) => b[1].length - a[1].length);
+  return subs.reduce((t, [k, v]) => t.split(v).join(`{${k}}`), String(text));
+}
+
+// 64 bits of a hash of the text, spacing evened out: equal text gives an equal fingerprint, and
+// the text can't be read back from it (someone guessing a short common label could confirm it).
+export function fingerprint(text, values) {
+  return createHash("sha256").update(maskValues(text, values).normalize("NFC").replace(/\s+/g, " ").trim()).digest("hex").slice(0, 16);
+}
+
+// Whether live text is what a fingerprint was taken of: as it reads, or with the current values
+// in it masked (then the recorded text held the values it was recorded with in their place).
+export function matches(text, print, values) {
+  const masked = maskValues(text, values);
+  return fingerprint(text) === print || (masked !== String(text) && fingerprint(masked) === print);
 }
 
 const nameOf = e => (e.label || e.text || e.placeholder || e.name || "").slice(0, 80);
-const sameKind = (e, d) => e.tag === d.tag && nameOf(e) === d.name && !!e.frame === !!d.frame;
+const sameKind = (a, b) => a.tag === b.tag && nameOf(a) === nameOf(b) && !!a.frame === !!b.frame;
 
-// What identifies an element across visits: its kind, its name, and the text around it. Given the
-// page's elements, `alike` notes that look-alikes stood next to it, so its surroundings told it apart.
-export function describe(el, elements = []) {
+// What identifies an element across visits: its kind, and fingerprints of its name, the text
+// around it and its link. Given the page's elements, `alike` notes that look-alikes stood next to
+// it, so its surroundings told it apart.
+export function describe(el, elements = [], values = {}) {
   if (!el) return null;
-  const d = { tag: el.tag, name: nameOf(el) };
-  if (el.near) d.near = el.near.slice(0, 100);
-  if (el.href) d.href = el.href;
+  const d = { tag: el.tag, name: fingerprint(nameOf(el), values) };
+  if (el.near) d.near = fingerprint(el.near, values);
+  if (el.href) d.href = fingerprint(el.href, values);
   if (el.frame) d.frame = true;
-  if (elements.some(e => e !== el && sameKind(e, d))) d.alike = true;
+  if (elements.some(e => e !== el && sameKind(e, el))) d.alike = true;
   return d;
 }
 
@@ -45,31 +71,17 @@ export function describe(el, elements = []) {
 // look-alikes the one with the same surrounding text. Ambiguity means no match. One that had
 // look-alikes must keep its surroundings even when it is the only one left: that one may be
 // another row, the recorded one gone.
-export function findElement(d, elements) {
+export function findElement(d, elements, values = {}) {
   if (!d) return null;
-  const same = elements.filter(e => sameKind(e, d));
+  const same = elements.filter(e => e.tag === d.tag && !!e.frame === !!d.frame && matches(nameOf(e), d.name, values));
   if (same.length === 1 && !d.alike) return same[0];
-  const byNear = same.filter(e => (e.near ?? "") === (d.near ?? "") && (e.href ?? null) === (d.href ?? null));
+  const fits = (text, print) => text ? !!print && matches(text, print, values) : !print;
+  const byNear = same.filter(e => fits(e.near, d.near) && fits(e.href, d.href));
   return byNear.length === 1 ? byNear[0] : null;
 }
 
-// Page text can repeat what was typed (a new todo, a search term), and a recipe keeps values by name
-// only. So their contents become {name} in what a step records, and replay puts the current values
-// back: replayed with other values, a step looks for the element that goes with them. Contents
-// shorter than 3 characters are left, they would match all over the text.
-function mapText(step, f) {
-  const d = x => x && { ...x, ...Object.fromEntries(["name", "near", "href"].filter(k => x[k]).map(k => [k, f(x[k], k === "near" ? 100 : 80)])) };
-  return { ...step, at: f(step.at, Infinity), ...(step.target ? { target: d(step.target) } : {}), ...(step.destination ? { destination: d(step.destination) } : {}) };
-}
-
-export function maskValues(step, values) {
-  const subs = Object.entries(values).map(([k, v]) => [k, String(v)]).filter(([, v]) => v.length >= 3).sort((a, b) => b[1].length - a[1].length);
-  return mapText(step, s => subs.reduce((t, [k, v]) => t.split(v).join(`{${k}}`), s));
-}
-
-export function fillValues(step, values) {
-  return mapText(step, (s, max) => s.replace(/\{([^{}]+)\}/g, (m, k) => Object.hasOwn(values, k) ? String(values[k]) : m).slice(0, max));
-}
+// Recipes in the fingerprinted form carry this. Older ones kept page text: never used, and dropped.
+const FORMAT = 2;
 
 // Several processes can share the file (one MCP server per agent session), so every change
 // re-reads it first and writes it back atomically: a concurrent write can be lost, the file can't be torn.
@@ -77,11 +89,16 @@ export class RecipeBook {
   constructor({ file = recipeFile(), max = 500 } = {}) {
     this.file = file; this.max = max;
     this.recipes = this.load();
+    if (this.stale) this.change(() => {});
   }
 
   load() {
-    if (!this.file) return {};
-    try { return JSON.parse(readFileSync(this.file, "utf8")); } catch { return {}; }
+    let r = {};
+    if (this.file) try { r = JSON.parse(readFileSync(this.file, "utf8")); } catch {}
+    if (!r || typeof r !== "object" || Array.isArray(r)) r = {};
+    const kept = Object.fromEntries(Object.entries(r).filter(([, x]) => x?.v === FORMAT && Array.isArray(x.steps)));
+    this.stale = Object.keys(kept).length < Object.keys(r).length;
+    return kept;
   }
 
   get(key) { this.recipes = this.load(); return this.recipes[key] ?? null; }
@@ -89,7 +106,7 @@ export class RecipeBook {
   // steps: [{ tool, at, target?, checked?, valueKey?, option?, optionIndex?, key?, destination?, irreversible? }]
   put(key, steps) {
     if (!steps.length) return;
-    this.change(r => { r[key] = { steps, saved: new Date().toISOString(), replays: 0, misses: 0 }; });
+    this.change(r => { r[key] = { v: FORMAT, steps, saved: new Date().toISOString(), replays: 0, misses: 0 }; });
   }
 
   note(key, { replayed = false, missed = false } = {}) {
@@ -116,7 +133,7 @@ export class RecipeBook {
     }
     this.recipes = r;
     try {
-      // it holds bits of the pages the user worked on: theirs to read, nobody else's
+      // what the user worked on, even as fingerprints: theirs to read, nobody else's
       mkdirSync(dirname(this.file), { recursive: true, mode: 0o700 });
       const tmp = `${this.file}.${process.pid}.tmp`;
       writeFileSync(tmp, JSON.stringify(r, null, 1), { mode: 0o600 });

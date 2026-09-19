@@ -7,7 +7,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { chromium } from "playwright";
 import { Barq } from "../src/session.mjs";
-import { RecipeBook, recipeKey } from "../src/recipes.mjs";
+import { RecipeBook, recipeKey, fingerprint } from "../src/recipes.mjs";
 
 let browser;
 before(async () => { browser = await chromium.launch({ headless: true }); });
@@ -87,7 +87,39 @@ test("values are replayed by name, and what they contained never reaches the rec
   assert.equal(await b.page.evaluate(() => location.hash), "#dogs", "the link for the new value, not the recorded one");
   const saved = readFileSync(file, "utf8");
   assert.doesNotMatch(saved, /cats|dogs/);
-  assert.match(saved, /\{q\}/);
+});
+
+test("the recipe file holds none of the page's words, and still replays", async t => {
+  const PAGES = {
+    "/kumquat/orchard": `<h1>Quokka Marzipan Observatory</h1><label>Pelican <input placeholder="Tangerine"></label>
+      <button>Gondola</button><select aria-label="Basalt"><option>Walrus</option><option>Obsidian</option><option>Nectarine</option></select>
+      <p>Harbour Mosaic <a href="/kumquat/lagoon">Saffron</a></p>`,
+    "/kumquat/lagoon": `<h1>Lagoon Cormorant</h1>`,
+  };
+  const { b, file } = await session(t, "");
+  await b.page.route("https://words.test/**", route => route.fulfill({ contentType: "text/html", body: PAGES[new URL(route.request().url()).pathname] ?? "" }));
+  await b.open("https://words.test/kumquat/orchard");
+  const words = await b.page.evaluate(() => [document.body.innerText, ...[...document.querySelectorAll("*")].flatMap(e => [...e.attributes].map(a => a.value))].join(" "));
+  jev(b, (page, history) => !did(history, "Pelican") ? answer({ tool: "type", target: el(page, e => e.label === "Pelican"), value: "note" })
+    : !did(history, "Gondola") ? answer({ target: el(page, e => e.text === "Gondola") }) : finished(0.95));
+  assert.equal((await b.do("Write the zebracorn", { values: { note: "zebracorn" } })).recipe, "recorded");
+  const stone = (page, history) => page.url.endsWith("/lagoon") ? finished(0.95)
+    : !history.some(h => h.action === "select") ? answer({ tool: "select", target: el(page, e => e.tag === "select") }) : answer({ target: el(page, e => e.text === "Saffron") });
+  jev(b, stone, () => ({ opt: { choice: "1" } }));
+  assert.equal((await b.do("Pick the obsidian stone")).recipe, "recorded");
+
+  const saved = readFileSync(file, "utf8");
+  const pageWords = new Set(`${words} ${await b.page.evaluate(() => document.body.innerText)} kumquat orchard lagoon words.test zebracorn Write Pick obsidian stone`.match(/[\p{L}.]{4,}/gu).map(w => w.toLowerCase()));
+  assert.deepEqual([...pageWords].filter(w => saved.toLowerCase().includes(w)), []);
+
+  // replays from the fingerprints alone: the same option, then the same link
+  await b.open("https://words.test/kumquat/orchard");
+  const n = jev(b, () => finished(0.95));
+  const r = await b.do("Pick the obsidian stone");
+  assert.equal(r.recipe, "replayed");
+  assert.equal(n.decide, 1);
+  assert.equal(r.actions[0].option, "Obsidian");
+  assert.equal(new URL(b.page.url()).pathname, "/kumquat/lagoon");
 });
 
 test("a target that is gone stops the replay, and the loop finishes the step and records it again", async t => {
@@ -106,7 +138,7 @@ test("a target that is gone stops the replay, and the loop finishes the step and
   assert.deepEqual(notes, [{ missed: true }]);
   assert.deepEqual(await b.page.evaluate(() => ({ ...document.body.dataset })), { next: "1", end: "1" });
   const key = recipeKey("Complete the wizard", b.page.url(), {});
-  assert.deepEqual(book.get(key).steps.map(s => s.target.name), ["Next", "Done"]);
+  assert.deepEqual(book.get(key).steps.map(s => s.target.name), ["Next", "Done"].map(t => fingerprint(t)));
 });
 
 test("a replayed action on a control that pays waits for allow_irreversible, then pays on the next call without Jev", async t => {
@@ -186,7 +218,7 @@ test("a flow stopped for confirmation is recorded whole under its first page, th
   assert.deepEqual(r.actions.map(h => h.element), ['button "Pay now"']);
   assert.ok(did(n.histories[0], "Add to cart"), "Jev sees what ran before the stop");
   assert.equal(await cart(), "1");
-  assert.deepEqual(book.get(recipeKey("Buy the mug", "https://shop.test/mug")).steps.map(s => s.target.name), ["Add to cart", "Pay now"]);
+  assert.deepEqual(book.get(recipeKey("Buy the mug", "https://shop.test/mug")).steps.map(s => s.target.name), ["Add to cart", "Pay now"].map(t => fingerprint(t)));
   assert.equal(book.get(recipeKey("Buy the mug", "https://shop.test/checkout")), null);
 
   // from the start again: the replay adds the mug and stops at Pay, then pays when allowed

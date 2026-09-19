@@ -1,9 +1,9 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { RecipeBook, recipeKey, place, describe, findElement, maskValues, fillValues } from "../src/recipes.mjs";
+import { RecipeBook, recipeKey, place, describe, findElement, fingerprint, matches } from "../src/recipes.mjs";
 
 test("a recipe key ignores query, fragment, case and value contents", () => {
   assert.equal(place("https://x.com/a/b/?q=1#top"), "https://x.com/a/b");
@@ -19,8 +19,8 @@ test("elements are found again by kind, name and surroundings, and ambiguity is 
   ];
   assert.equal(findElement(describe(els[2]), els).i, 2);
   assert.equal(findElement(describe(els[1]), els).i, 1);
-  assert.equal(findElement({ tag: "button", name: "Delete", near: "call mum" }, els), null);
-  assert.equal(findElement({ tag: "button", name: "Save" }, els), null);
+  assert.equal(findElement({ tag: "button", name: fingerprint("Delete"), near: fingerprint("call mum") }, els), null);
+  assert.equal(findElement({ tag: "button", name: fingerprint("Save") }, els), null);
 });
 
 test("an element told apart from look-alikes is not taken for the one look-alike left", () => {
@@ -32,12 +32,29 @@ test("an element told apart from look-alikes is not taken for the one look-alike
   assert.equal(findElement(describe(els[1], [els[1]]), [els[0]]).i, 0, "one that stood alone is found by its name");
 });
 
-test("value contents become their names in a step, and replay fills in the current ones", () => {
-  const step = { tool: "click", at: "https://x.com/search/cats", target: { tag: "a", name: "Open cats", near: "Results for cats", href: "/r/cats" } };
-  const masked = maskValues(step, { q: "cats", n: "1" });
-  assert.deepEqual(masked, { tool: "click", at: "https://x.com/search/{q}", target: { tag: "a", name: "Open {q}", near: "Results for {q}", href: "/r/{q}" } });
-  assert.deepEqual(fillValues(masked, { q: "dogs" }).target, { tag: "a", name: "Open dogs", near: "Results for dogs", href: "/r/dogs" });
-  assert.equal(fillValues(masked, {}).target.name, "Open {q}");
+test("descriptions hold fingerprints, and value contents are masked by name before they are taken", () => {
+  const link = { i: 0, tag: "a", text: "Open cats", near: "Results for cats", href: "/r/cats" };
+  const d = describe(link, [link], { q: "cats", n: "1" });
+  assert.doesNotMatch(JSON.stringify(d), /Open|Results|cats|\/r\//);
+  assert.deepEqual(d, { tag: "a", name: fingerprint("Open {q}"), near: fingerprint("Results for {q}"), href: fingerprint("/r/{q}") });
+  // replayed with another value, the element for that value matches, and the one for the old doesn't
+  const now = [{ ...link, i: 1 }, { i: 2, tag: "a", text: "Open dogs", near: "Results for dogs", href: "/r/dogs" }];
+  assert.equal(findElement(d, now, { q: "dogs" }).i, 2);
+  // text that happens to equal a value still matches as it reads
+  assert.ok(matches("Search", fingerprint("Search"), { q: "Search" }));
+  assert.equal(fingerprint(" Pay  now "), fingerprint("Pay now"));
+  assert.match(fingerprint("Pay now"), /^[0-9a-f]{16}$/);
+});
+
+test("a recipe file in the old readable form is dropped, not used and not a crash", () => {
+  const dir = mkdtempSync(join(tmpdir(), "barq-recipes-"));
+  const file = join(dir, "recipes.json");
+  writeFileSync(file, JSON.stringify({ "https://x.com/login :: log in :: email": { steps: [{ tool: "click", at: "https://x.com/login", target: { tag: "button", name: "Log in" } }], saved: "2026-01-01T00:00:00.000Z", replays: 0, misses: 0 } }));
+  const book = new RecipeBook({ file });
+  assert.equal(book.get("https://x.com/login :: log in :: email"), null);
+  assert.doesNotMatch(readFileSync(file, "utf8"), /Log in|x\.com/);
+  for (const junk of ["[1, 2]", "null", "not json"]) { writeFileSync(file, junk); assert.equal(new RecipeBook({ file }).get("k"), null); }
+  rmSync(dir, { recursive: true, force: true });
 });
 
 test("the book persists, merges with other writers, and drops recipes that keep missing", () => {
