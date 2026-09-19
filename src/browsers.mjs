@@ -146,6 +146,7 @@ export class AttachedBrowser {
 
   constructor(browser, endpoint, { placement = "auto", group = {}, size = { width: 1280, height: 800 } } = {}) {
     this.browser = browser; this.endpoint = endpoint; this.placement = placement; this.size = size;
+    this.owner = Math.random().toString(36).slice(2, 10);
     this.group = { title: "Agent", color: "purple", collapsed: true, ...group };
     if (!GROUP_COLORS.includes(this.group.color)) this.group.color = "purple";
     this.context = browser.contexts()[0];
@@ -231,7 +232,8 @@ export class AttachedBrowser {
     if (sw) {
       try {
         const title = session === "main" ? this.group.title : `${this.group.title} · ${session}`;
-        const { tabId } = await sw.evaluate(args => self.jevGroup(args), { marker: this.markers.get(page), session, ...this.group, title });
+        // groups are this connection's own: another agent's "main" session gets a group of its own
+        const { tabId } = await sw.evaluate(args => self.jevGroup(args), { marker: this.markers.get(page), session: `${this.owner}:${session}`, ...this.group, title });
         (this.tabIds ??= new WeakMap()).set(page, tabId);
         return page;
       } catch (e) {
@@ -334,13 +336,21 @@ export class LaunchedBrowser {
 // JEV_BROWSER_ATTACH=chrome|edge|brave|...|auto|<dir>|<url> drives a running browser ("launch" or unset: don't)
 // (JEV_BROWSER_PLACEMENT=auto|group|window|tab, JEV_BROWSER_GROUP_TITLE, JEV_BROWSER_GROUP_COLOR);
 // otherwise a browser is launched (JEV_BROWSER_CHANNEL=chrome|msedge, JEV_BROWSER_PROFILE, JEV_BROWSER_HEADED=1).
-export function browserConfig(env = process.env) {
+// The name of the project the agent works in (its folder), which names its tab group, so tabs
+// from agents in different projects are told apart at a glance.
+export function projectLabel(dir, home = homedir()) {
+  if (!dir || dir === "/" || dir === home) return undefined;
+  return dir.split(/[\\/]/).filter(Boolean).at(-1)?.slice(0, 40);
+}
+
+export function browserConfig(env = process.env, cwd = process.cwd()) {
   // an unset plugin setting can arrive as its literal "${...}" placeholder
   env = Object.fromEntries(Object.entries(env).filter(([, v]) => typeof v === "string" && !v.startsWith("${")));
   if (env.JEV_BROWSER_ATTACH && env.JEV_BROWSER_ATTACH !== "launch") {
     const placement = ["group", "window", "tab"].includes(env.JEV_BROWSER_PLACEMENT) ? env.JEV_BROWSER_PLACEMENT : "auto";
     const group = {};
-    if (env.JEV_BROWSER_GROUP_TITLE) group.title = env.JEV_BROWSER_GROUP_TITLE;
+    const title = env.JEV_BROWSER_GROUP_TITLE || projectLabel(env.CLAUDE_PROJECT_DIR || cwd);
+    if (title) group.title = title;
     if (env.JEV_BROWSER_GROUP_COLOR) group.color = env.JEV_BROWSER_GROUP_COLOR;
     return { kind: "attach", spec: env.JEV_BROWSER_ATTACH, placement, group };
   }

@@ -62,7 +62,7 @@ independent tasks; `browser_sessions` lists them and `browser_close` closes one 
 
 When the server is set to attach (`JEV_BROWSER_ATTACH`, or the plugin's browser option), the
 agent works inside the user's running Chrome or Edge with their logins. Its tabs sit in a
-collapsed "Agent" tab group (with the helper extension) or in a separate window, and never take
+collapsed tab group named after the project (with the helper extension) or in a separate window, and never take
 over the user's tab. The browser asks the user to "Allow" remote debugging once per browser run
 (the connection is kept and shared between sessions): tell them to click it if a call waits.
 

@@ -10,7 +10,7 @@ import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { chromium } from "playwright";
-import { findEndpoint, userDataDir, inspectPage, readActivePort, AttachedBrowser, HELPER_EXTENSION_ID, HELPER_VERSION } from "../src/browsers.mjs";
+import { findEndpoint, userDataDir, inspectPage, readActivePort, projectLabel, browserConfig, AttachedBrowser, HELPER_EXTENSION_ID, HELPER_VERSION } from "../src/browsers.mjs";
 import { JevBrowser } from "../src/session.mjs";
 
 const sleep = ms => new Promise(done => setTimeout(done, ms));
@@ -119,6 +119,24 @@ test("attached: tabs go in a group, a popup joins it and the user keeps their ta
     await jb.close();
     await host.dispose();
     assert.ok(chrome.alive(), "disposing disconnects without closing the user's browser");
+  } finally { await chrome.stop(); }
+});
+
+test("groups are named after the agent's project; each connection keeps its own", async () => {
+  assert.equal(projectLabel("/home/u/work/shop"), "shop");
+  assert.equal(projectLabel("/home/u", "/home/u"), undefined, "no project: the default name");
+  assert.deepEqual(browserConfig({ JEV_BROWSER_ATTACH: "edge", CLAUDE_PROJECT_DIR: "/w/jev" }, "/elsewhere").group, { title: "jev" });
+  assert.deepEqual(browserConfig({ JEV_BROWSER_ATTACH: "edge", JEV_BROWSER_GROUP_TITLE: "Mine" }, "/w/jev").group, { title: "Mine" });
+
+  const chrome = await startBrowser({ extension: true });
+  try {
+    const one = await AttachedBrowser.connect(chrome.dir, { group: { title: "shop" } });
+    const two = await AttachedBrowser.connect(chrome.dir, { group: { title: "blog" } });
+    await one.newTab({ session: "main" }); await two.newTab({ session: "main" });
+    const sw = await one.helper();
+    const groups = await sw.evaluate(() => chrome.tabGroups.query({}).then(gs => gs.map(g => g.title).sort()));
+    assert.deepEqual(groups, ["blog", "shop"], "two agents' main sessions don't share a group");
+    await one.dispose(); await two.dispose();
   } finally { await chrome.stop(); }
 });
 
