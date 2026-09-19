@@ -27,7 +27,8 @@ need to read page dumps unless a step hands control back to you.
 - `done`: move on.
 - `likely_done`: probably done, but verify with `browser_check` or `browser_read` first.
 - `needs_confirmation`: the next action pays, sends, posts or deletes. Ask the user. Only re-call
-  with `allow_irreversible: true` if they say yes.
+  with `allow_irreversible: true` if they say yes, with the same goal and values: the step goes on
+  from where it stopped.
 - `needs_login`: a sign-in wall and no credentials given. Pass credentials (see secrets) or ask
   the user to log in in their browser.
 - `error`: the page shows an error; read `page_text`.

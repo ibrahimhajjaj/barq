@@ -130,8 +130,12 @@ a replay costs one Jev call and never claims "done" by itself. Anything that doe
 renamed button, a look-alike in a different row, a missing value, a checkbox already in the state
 the step leaves it) hands back to the normal loop.
 
+A recipe belongs to a page down to its query and fragment (tracking parameters aside), so what was
+recorded for item A never replays on item B, and a link's destination and a frame's address must
+still match.
+
 A flow with a pay or delete step stops there for confirmation, as it would in the loop. The next
-call for the same goal goes on from the action it stopped at, never from the start, and the whole
+call for the same goal, with the same values on the same page, goes on from the action it stopped at, never from the start, and the whole
 flow is recorded under the page it began on. If anything changed in between (another goal, other
 values, the page, the caller acting by hand), it neither replays nor records.
 
