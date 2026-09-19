@@ -80,7 +80,10 @@ user to allow every new connection. Chromium's source shows it's per WebSocket, 
 remember the answer. So a relay process holds the one approved connection and gives each client
 its own browser-level session over it: one prompt per browser run. It listens on 127.0.0.1 behind
 a random token in a file only the user can read, refuses anything with an `Origin` (web pages), and
-won't pass on commands that close or crash the browser. It leaves after 30 idle minutes because
+won't pass on commands that close or crash the browser. Tabs that were open before a client connected are kept out
+of its sight: it's never shown them, can't reach them by id, and so a tab the browser has put to
+sleep (which answers nothing) can't hold up the client's start, as one sleeping Google Meet tab
+once did for every new connection. It leaves after 30 idle minutes because
 the browser shows its automation bar while connected.
 
 ## Secrets

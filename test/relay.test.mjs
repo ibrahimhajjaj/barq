@@ -98,8 +98,34 @@ test("tabs a client opened and left open are closed when it goes; the user's sta
     await sleep(100);
   }
   assert.ok(!titles.includes("left behind") && !titles.includes("its popup"), `still open: ${titles}`);
-  assert.ok(b.contexts()[0].pages().some(q => q.url() === "about:blank"), "the user's own tab is untouched");
+  const direct = await raw(br.ws, { id: 1, method: "Target.getTargets" });
+  assert.ok(direct.result.targetInfos.some(t => t.type === "page" && t.url === "about:blank"), "the user's own tab is untouched");
   await b.close();
+});
+
+test("tabs open before a client came are out of its sight, and a sleeping one can't hold up its start", async () => {
+  const br = await startBrowser();
+  const relay = await startRelay(br.ws);
+  cleanups.push(() => relay.close());
+  // the user's tab, put to sleep the way a browser does with a tab left in the background
+  const user = await chromium.connectOverCDP(br.ws, { noDefaults: true });
+  const cdp = await user.contexts()[0].newCDPSession(user.contexts()[0].pages()[0]);
+  await cdp.send("Page.setWebLifecycleState", { state: "frozen" });
+  const t0 = Date.now();
+  const a = await chromium.connectOverCDP(relay.url, { noDefaults: true, timeout: 15_000 });
+  assert.ok(Date.now() - t0 < 5000, `connected in ${Date.now() - t0} ms`);
+  assert.equal(a.contexts()[0].pages().length, 0, "the user's tab isn't shown");
+  const s = await a.newBrowserCDPSession();
+  const userId = (await raw(br.ws, { id: 1, method: "Target.getTargets" })).result.targetInfos.find(t => t.type === "page").targetId;
+  assert.ok(!(await s.send("Target.getTargets")).targetInfos.some(t => t.targetId === userId), "nor listed");
+  await assert.rejects(s.send("Target.attachToTarget", { targetId: userId, flatten: true }), /No target/);
+  await assert.rejects(s.send("Target.closeTarget", { targetId: userId }), /No target/);
+  // its own tabs, and ones the user opens later, it sees as before
+  const mine = await a.contexts()[0].newPage();
+  await mine.goto("data:text/html,<title>mine</title>");
+  assert.equal(await mine.title(), "mine");
+  await cdp.send("Page.setWebLifecycleState", { state: "active" }).catch(() => {});
+  await a.close(); await user.close();
 });
 
 test("the relay goes away with the browser", async () => {

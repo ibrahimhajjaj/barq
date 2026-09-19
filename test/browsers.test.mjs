@@ -77,11 +77,18 @@ async function fetchTargets(dir) {
 }
 
 // The browser window a tab sits in.
-async function windowOf(host, page) {
-  const s = await host.context.newCDPSession(page);
+// The user's own tab, seen the way the user's browser has it: through a connection of its own,
+// since barq's connection is never shown tabs that were open before it came.
+async function userTab(chrome) {
+  const b = await chromium.connectOverCDP((await findEndpoint(chrome.dir)).ws, { noDefaults: true });
+  return { page: b.contexts()[0].pages().find(p => p.url().startsWith("data:")), done: () => b.close() };
+}
+
+async function windowOf(page) {
+  const s = await page.context().newCDPSession(page);
   const { targetInfo } = await s.send("Target.getTargetInfo");
   await s.detach();
-  const b = await host.browser.newBrowserCDPSession();
+  const b = await page.context().browser().newBrowserCDPSession();
   const { windowId } = await b.send("Browser.getWindowForTarget", { targetId: targetInfo.targetId });
   await b.detach();
   return windowId;
@@ -220,8 +227,9 @@ test("attached without the helper: auto falls back to a separate window", async 
   try {
     const host = await AttachedBrowser.connect(chrome.dir);
     const page = await host.newTab();
-    const userTab = host.context.pages().find(p => p.url().startsWith("data:"));
-    assert.notEqual(await windowOf(host, page), await windowOf(host, userTab), "the agent's tab is in a window of its own");
+    const user = await userTab(chrome);
+    assert.notEqual(await windowOf(page), await windowOf(user.page), "the agent's tab is in a window of its own");
+    await user.done();
     await page.goto(`${base}/agent`);
     assert.equal(await page.title(), "agent");
     await assert.rejects(new AttachedBrowser(host.browser, host.endpoint, { placement: "group" }).newTab(), /helper extension/);
@@ -238,12 +246,13 @@ test("a popup window an agent tab opens is minimized; the user's window never is
     await page.goto(`${base}/agent`);
     const [popup] = await Promise.all([page.waitForEvent("popup"), page.evaluate(url => window.open(url, "signin", "width=420,height=360"), `${base}/popup`)]);
     const state = async p => {
-      const b = await host.browser.newBrowserCDPSession();
-      try { return (await b.send("Browser.getWindowBounds", { windowId: await windowOf(host, p) })).bounds.windowState; } finally { await b.detach(); }
+      const b = await p.context().browser().newBrowserCDPSession();
+      try { return (await b.send("Browser.getWindowBounds", { windowId: await windowOf(p) })).bounds.windowState; } finally { await b.detach(); }
     };
     assert.equal(await until(async () => (await state(popup)) === "minimized" && "minimized"), "minimized");
-    const userTab = host.context.pages().find(p => p.url().startsWith("data:"));
-    assert.notEqual(await state(userTab), "minimized");
+    const user = await userTab(chrome);
+    assert.notEqual(await state(user.page), "minimized");
+    await user.done();
     assert.equal(await state(page), "normal", "a background tab in the user's window leaves that window alone");
     await host.dispose();
   } finally { await chrome.stop(); }
@@ -253,7 +262,16 @@ test("attaching leaves the user's tabs as they were: colour scheme, focus, and t
   const chrome = await startBrowser({ args: ["--force-dark-mode"] });
   try {
     const host = await AttachedBrowser.connect(chrome.dir);
-    const user = host.context.pages().find(p => p.url().startsWith("data:"));
+    // a tab the user opens while barq is connected: barq sees it, and must leave it as it is
+    // (opened with a bare protocol call: a second automation client would answer dialogs itself)
+    await new Promise((resolve, reject) => {
+      const { port, path } = readActivePort(chrome.dir), ws = new WebSocket(`ws://127.0.0.1:${port}${path}`);
+      ws.onopen = () => ws.send(JSON.stringify({ id: 1, method: "Target.createTarget", params: { url: "data:text/html,<title>later</title>user's later tab" } }));
+      ws.onmessage = () => { ws.close(); resolve(); };
+      ws.onerror = reject;
+    });
+    const user = await until(() => host.context.pages().find(p => p.url().includes("later")));
+    assert.ok(user, "barq sees tabs opened after it connected");
     assert.equal(await user.evaluate(() => matchMedia("(prefers-color-scheme: dark)").matches), true, "no forced light scheme");
     // a confirm() in the user's tab must wait for the user, not be answered by the automation
     let open;
@@ -276,12 +294,12 @@ test("a stopped helper worker is woken by the agent's new tab", async () => {
     assert.ok(worker);
     // stop it the way the browser does when a worker sits idle; a stray tab event can wake it
     // again straight away, so repeat until it stays down
-    const user = host.context.pages().find(p => p.url().startsWith("data:"));
-    const cdp = await host.context.newCDPSession(user);
+    const user = await userTab(chrome);
+    const cdp = await user.page.context().newCDPSession(user.page);
     await cdp.send("ServiceWorker.enable");
     const running = async () => (await fetchTargets(chrome.dir)).some(t => t.type === "service_worker" && t.url.includes(HELPER_EXTENSION_ID));
     const stopped = await until(async () => { await cdp.send("ServiceWorker.stopAllWorkers"); await sleep(300); return !(await running()); }, 10_000);
-    await cdp.detach();
+    await cdp.detach(); await user.done();
     await host.dispose();
     assert.ok(stopped, "the worker was stopped before the next connection");
     host = await AttachedBrowser.connect(chrome.dir);

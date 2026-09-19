@@ -74,11 +74,23 @@ export async function startRelay(upstream, { idleMs = IDLE_MS, onExit = () => {}
       if (p.resolve) return msg.error ? p.reject(new Error(msg.error.message)) : p.resolve(msg.result);
       if (msg.result?.sessionId && /^Target\.attachTo/.test(p.method)) owner.set(msg.result.sessionId, p.client);
       if (msg.result?.targetId && p.method === "Target.createTarget") p.client.tabs.add(msg.result.targetId);
+      if (p.method === "Target.getTargets" && Array.isArray(msg.result?.targetInfos)) msg = { ...msg, result: { ...msg.result, targetInfos: msg.result.targetInfos.filter(t => !p.client.hidden.has(t.targetId)) } };
       return deliver(p.client, { ...msg, id: p.id });
     }
     const c = owner.get(msg.sessionId);
     if (!c) return;
     // sessions opened for a client (its tabs, their frames and workers) are that client's
+    const hid = msg.params?.targetInfo?.targetId ?? msg.params?.targetId;
+    if (msg.sessionId === c.root && c.hidden.has(hid)) {
+      // attached by the client's auto-attach: let it run on and let go of it, unseen
+      if (msg.method === "Target.attachedToTarget") {
+        const sid = msg.params.sessionId;
+        if (msg.params.waitingForDebugger) send({ id: nextId++, method: "Runtime.runIfWaitingForDebugger", sessionId: sid });
+        send({ id: nextId++, method: "Target.detachFromTarget", params: { sessionId: sid }, sessionId: c.root });
+      }
+      if (msg.method === "Target.targetDestroyed") c.hidden.delete(hid);
+      return;
+    }
     if (msg.method === "Target.attachedToTarget") {
       owner.set(msg.params.sessionId, c);
       // a tab one of its tabs opened is the client's too
@@ -100,10 +112,15 @@ export async function startRelay(upstream, { idleMs = IDLE_MS, onExit = () => {}
   });
 
   function serve(ws) {
-    const c = { ws, root: null, tabs: new Set() };
+    const c = { ws, root: null, tabs: new Set(), hidden: new Set() };
     clients.add(c); idle();
     log(`client connected (${clients.size} now)`);
-    const ready = call("Target.attachToBrowserTarget").then(r => { c.root = r.sessionId; owner.set(c.root, c); });
+    // The tabs open before a client came (the user's, another client's) stay out of its sight: it
+    // never needs them, reading them isn't its business, and one the browser has put to sleep
+    // would hold up its startup, which sets up every tab it's shown.
+    const ready = call("Target.getTargets")
+      .then(r => { for (const t of r.targetInfos) if (t.type === "page" || t.type === "background_page") c.hidden.add(t.targetId); })
+      .then(() => call("Target.attachToBrowserTarget")).then(r => { c.root = r.sessionId; owner.set(c.root, c); });
     ready.catch(() => ws.close());
     ws.on("message", async data => {
       // one bad message from one client mustn't take the shared connection down with it
@@ -116,6 +133,10 @@ export async function startRelay(upstream, { idleMs = IDLE_MS, onExit = () => {}
       if (owner.get(sessionId) !== c) return deliver(c, { id: msg.id, sessionId: msg.sessionId, error: { code: -32001, message: "Session with given id not found." } });
       // the browser is the user's: a client may leave it, never close it
       if (msg.method === "Browser.close" || msg.method === "Browser.crash" || msg.method === "Browser.crashGpuProcess") { deliver(c, { id: msg.id, result: {} }); return ws.close(); }
+      // nor reach, by name, a tab kept out of its sight
+      if (/^Target\.(attachToTarget|closeTarget|activateTarget|exposeDevToolsProtocol)$/.test(msg.method) && c.hidden.has(msg.params?.targetId)) {
+        return deliver(c, { id: msg.id, sessionId: msg.sessionId, error: { code: -32000, message: "No target with given id found" } });
+      }
       const id = nextId++;
       pending.set(id, { client: c, id: msg.id, method: msg.method });
       send({ ...msg, id, sessionId });
