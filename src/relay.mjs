@@ -64,7 +64,7 @@ export async function startRelay(upstream, { idleMs = IDLE_MS, onExit = () => {}
     if (msg.sessionId === c.root) { msg = { ...msg }; delete msg.sessionId; }
     if (c.ws.readyState === WebSocket.OPEN) c.ws.send(JSON.stringify(msg));
   };
-  const idle = () => { clearTimeout(idleTimer); if (!clients.size) idleTimer = setTimeout(() => close(`no client for ${Math.round(idleMs / 60_000)} min`), idleMs); };
+  const idle = () => { clearTimeout(idleTimer); if (!closed && !clients.size) idleTimer = setTimeout(() => close(`no client for ${Math.round(idleMs / 60_000)} min`), idleMs); };
 
   up.on("message", data => {
     let msg; try { msg = JSON.parse(data); } catch { return; }
@@ -158,7 +158,10 @@ export async function startRelay(upstream, { idleMs = IDLE_MS, onExit = () => {}
     if (closed) return; closed = true;
     log(`stopping: ${why}`);
     clearTimeout(idleTimer);
-    for (const c of clients) c.ws.close();
+    // going away with clients still on it: their tabs go too, as when a client leaves by itself
+    for (const c of clients) for (const targetId of c.tabs) send({ id: nextId++, method: "Target.closeTarget", params: { targetId } });
+    // the relay is going away: its clients' sockets are cut, not asked to close politely
+    for (const c of clients) c.ws.terminate();
     wss.close(); server.close(); up.close();
     onExit(why);
   }
@@ -231,8 +234,10 @@ if (process.argv[1] && fileURLToPath(import.meta.url) === path.resolve(process.a
   // first a placeholder, so other servers wait for this relay instead of starting another
   write({ upstream, pid: process.pid });
   log(`waiting for the browser to allow the connection (${upstream.replace(/\/devtools\/.*/, "")})`);
-  startRelay(upstream, { log, onExit: () => { forget(); process.exit(0); } })
-    .then(r => { write({ url: r.url, upstream, pid: process.pid }); log("allowed; serving"); })
+  let relay;
+  // a moment for the last messages (closing clients' tabs) to reach the browser
+  startRelay(upstream, { log, onExit: () => { forget(); setTimeout(() => process.exit(0), 300); } })
+    .then(r => { relay = r; write({ url: r.url, upstream, pid: process.pid }); log("allowed; serving"); })
     .catch(e => { log(`not allowed: ${e.message}`); write({ error: `the browser didn't allow the connection: ${e.message}`, upstream, pid: process.pid }); setTimeout(() => process.exit(1), 5000); });
-  for (const sig of ["SIGINT", "SIGTERM", "SIGHUP"]) process.on(sig, () => { log(`stopping: ${sig}`); forget(); process.exit(0); });
+  for (const sig of ["SIGINT", "SIGTERM", "SIGHUP"]) process.on(sig, () => { if (relay) return relay.close(sig); log(`stopping: ${sig}`); forget(); process.exit(0); });
 }

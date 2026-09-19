@@ -128,6 +128,23 @@ test("tabs open before a client came are out of its sight, and a sleeping one ca
   await a.close(); await user.close();
 });
 
+test("a relay that is stopped closes the tabs of the clients still on it", async () => {
+  const br = await startBrowser();
+  const relay = await startRelay(br.ws);
+  const a = await chromium.connectOverCDP(relay.url, { noDefaults: true });
+  const p = await a.contexts()[0].newPage();
+  await p.goto("data:text/html,<title>still working</title>");
+  relay.close("stopped by hand");
+  let titles = [];
+  for (let i = 0; i < 30; i++) {
+    titles = (await raw(br.ws, { id: 1, method: "Target.getTargets" })).result.targetInfos.filter(t => t.type === "page").map(t => t.title);
+    if (!titles.includes("still working")) break;
+    await sleep(100);
+  }
+  assert.ok(!titles.includes("still working"), `still open: ${titles}`);
+  await a.close().catch(() => {});
+});
+
 test("the relay goes away with the browser", async () => {
   const br = await startBrowser();
   let exited = false;
