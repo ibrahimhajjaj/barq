@@ -97,6 +97,9 @@ export async function findEndpoint(spec = "auto", opts = {}) {
 
 // The helper extension in extension/ (its manifest key pins this id). Loaded unpacked once per
 // browser, it lets the agent keep its tabs in a named tab group, which the DevTools protocol can't do.
+// The helper's version in this copy of the extension.
+export const HELPER_VERSION = JSON.parse(readFileSync(new URL("../extension/manifest.json", import.meta.url), "utf8")).version;
+const older = (a, b) => { const x = a.split(".").map(Number), y = b.split(".").map(Number); for (let i = 0; i < 3; i++) if ((x[i] ?? 0) !== (y[i] ?? 0)) return (x[i] ?? 0) < (y[i] ?? 0); return false; };
 export const HELPER_EXTENSION_ID = "cbkdahgldeliodgkkmlmkmakamfoejec";
 export const GROUP_COLORS = ["grey", "blue", "red", "yellow", "green", "pink", "purple", "cyan", "orange"];
 
@@ -195,11 +198,27 @@ export class AttachedBrowser {
   }
 
   // The helper extension's service worker. The worker listens for new tabs, so creating the
-  // agent's tab wakes it if the browser had stopped it.
+  // agent's tab wakes it if the browser had stopped it. A helper loaded from an older copy of the
+  // extension (loaded unpacked, it doesn't update itself) is reloaded once from disk.
   async helper(timeout = 5000) {
     const ours = w => w.url().startsWith(`chrome-extension://${HELPER_EXTENSION_ID}/`);
-    return this.context.serviceWorkers().find(ours)
-      ?? await this.context.waitForEvent("serviceworker", { predicate: ours, timeout }).catch(() => null);
+    const find = () => this.context.serviceWorkers().find(ours)
+      ?? this.context.waitForEvent("serviceworker", { predicate: ours, timeout }).catch(() => null);
+    const sw = await find();
+    if (!sw || this.helperChecked) return sw;
+    this.helperChecked = true;
+    const version = await sw.evaluate(() => self.jevVersion?.()).catch(() => null);
+    if (!version || !older(version, HELPER_VERSION)) return sw;
+    await sw.evaluate(() => chrome.runtime.reload()).catch(() => {});
+    for (let i = 0; i < 50 && this.context.serviceWorkers().includes(sw); i++) await sleep(100);
+    // the reloaded worker starts on its next event; a tab opening is one (this happens once per
+    // update of the extension)
+    const woke = this.context.waitForEvent("serviceworker", { predicate: ours, timeout: Math.max(timeout, 5000) }).catch(() => null);
+    const cdp = await (this.cdp ??= this.browser.newBrowserCDPSession());
+    const { targetId } = await cdp.send("Target.createTarget", { url: "about:blank", background: true }).catch(() => ({}));
+    const fresh = await woke;
+    if (targetId) await cdp.send("Target.closeTarget", { targetId }).catch(() => {});
+    return fresh ?? find();
   }
 
   async newTab({ session = "main" } = {}) {

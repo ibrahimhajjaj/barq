@@ -10,7 +10,7 @@ import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { chromium } from "playwright";
-import { findEndpoint, userDataDir, inspectPage, readActivePort, AttachedBrowser, HELPER_EXTENSION_ID } from "../src/browsers.mjs";
+import { findEndpoint, userDataDir, inspectPage, readActivePort, AttachedBrowser, HELPER_EXTENSION_ID, HELPER_VERSION } from "../src/browsers.mjs";
 import { JevBrowser } from "../src/session.mjs";
 
 const sleep = ms => new Promise(done => setTimeout(done, ms));
@@ -142,6 +142,27 @@ test("front() puts an agent tab in front for a moment and gives the user their t
     assert.equal(after.collapsed, true, "and the group folded up again");
     await host.dispose();
   } finally { await chrome.stop(); }
+});
+
+// A helper loaded unpacked doesn't update itself. (A browser that loaded it from the command line
+// drops it on reload, so this runs against stand-ins for the browser.)
+test("a helper from an older copy of the extension is reloaded, then woken by a tab opening", async () => {
+  const worker = version => ({ url: () => `chrome-extension://${HELPER_EXTENSION_ID}/sw.js`, evaluate: async fn => {
+    if (String(fn).includes("jevVersion")) return version;
+    if (String(fn).includes("reload")) workers = workers.filter(w => w !== old);
+  } });
+  const old = worker("0.0.1"), fresh = worker(HELPER_VERSION), waiting = [], opened = [];
+  let workers = [old];
+  const host = Object.create(AttachedBrowser.prototype);
+  host.context = { serviceWorkers: () => workers, waitForEvent: (e, { timeout }) => new Promise((resolve, reject) => { waiting.push(resolve); setTimeout(() => reject(new Error("timeout")), timeout); }) };
+  host.cdp = Promise.resolve({ send: async (method, params) => {
+    if (method === "Target.createTarget") { opened.push(params); workers.push(fresh); waiting.splice(0).forEach(r => r(fresh)); return { targetId: "t1" }; }
+    if (method === "Target.closeTarget") opened.push("closed");
+    return {};
+  } });
+  assert.equal(await host.helper(1000), fresh);
+  assert.deepEqual(opened, [{ url: "about:blank", background: true }, "closed"], "one background tab, closed again");
+  assert.equal(await host.helper(1000), fresh, "checked once per connection");
 });
 
 test("attached without the helper: auto falls back to a separate window", async () => {
