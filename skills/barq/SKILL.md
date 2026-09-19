@@ -22,6 +22,15 @@ need to read page dumps unless a step hands control back to you.
    it, from the whole page. Without a question it returns the page text a page at a time.
 5. Confirm side effects with `browser_check` (a yes/no probability) before moving on.
 
+## Many pages
+
+When you already know the URLs (dated listings, search result pages, product pages) and only
+need to read them, use `browser_scan` instead of opening them one by one: it reads them in a few
+background tabs, one JSON line per page into a file, with no model tokens per page. It returns at
+once; follow it with `browser_scan_status`, then read the file. Pass `js` (an expression run in
+the page) or `selector`, and `click_until_gone` for a "load more" button. If it reports
+`blocked`, a site showed a captcha or "unusual traffic" page: tell the user and stop.
+
 ## Statuses from browser_do
 
 - `done`: move on.

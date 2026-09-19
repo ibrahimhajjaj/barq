@@ -144,6 +144,17 @@ are stored as 64-bit fingerprints, values are masked as their names before hashi
 compares fingerprints taken the same way from the live page. A fingerprint can't be read back,
 though a short common label could be guessed and confirmed; the file is readable only by its owner.
 
+## Scanning without deciding
+
+Some jobs have no decisions in them at all: a known list of URLs, the same extraction on each. A
+Google Flights scan of about 1,600 pages in the user's own Edge showed the cost of doing those
+through an agent: 12.7 s and about 2,800 model tokens a page, one tab at a time, against 3.4 s and
+next to no tokens with a plain loop over barq's browser. `scan()` is that loop: a few background
+tabs, random gaps between loads, one JSON line per page, a checkpoint a rerun resumes from, one more
+try after an error, and a full stop at a captcha or "unusual traffic" page, because the right
+answer there is a person, not a workaround. The MCP tool runs it in the background and hands back
+counts and a sample, never the pages.
+
 ## What still breaks
 
 - Judging many values at once (is this table sorted?). Jev reads a state; it doesn't compare a
