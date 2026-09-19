@@ -106,7 +106,10 @@ export async function startRelay(upstream, { idleMs = IDLE_MS, onExit = () => {}
     const ready = call("Target.attachToBrowserTarget").then(r => { c.root = r.sessionId; owner.set(c.root, c); });
     ready.catch(() => ws.close());
     ws.on("message", async data => {
+      // one bad message from one client mustn't take the shared connection down with it
       let msg; try { msg = JSON.parse(data); } catch { return; }
+      if (!msg || typeof msg !== "object" || Array.isArray(msg) || typeof msg.method !== "string" || !Number.isSafeInteger(msg.id)
+        || (msg.sessionId != null && typeof msg.sessionId !== "string")) return;
       await ready.catch(() => {});
       if (!c.root || ws.readyState !== WebSocket.OPEN) return;
       const sessionId = msg.sessionId ?? c.root;
@@ -185,8 +188,11 @@ export async function relayEndpoint(upstream, { timeoutMs = 120_000, dir = state
       } catch (e) {
         if (e.code !== "EEXIST") throw e;
         // another server is starting it; a lock left by one that died is cleared
-        const holder = Number(fs.readFileSync(lock, "utf8"));
-        if (!alive(holder) || Date.now() - fs.statSync(lock).mtimeMs > 30_000) fs.rmSync(lock, { force: true });
+        // (it can also have finished and removed the lock since: then just look again)
+        try {
+          const holder = Number(fs.readFileSync(lock, "utf8")), age = Date.now() - fs.statSync(lock).mtimeMs;
+          if (!alive(holder) || age > 30_000) fs.rmSync(lock, { force: true });
+        } catch (e2) { if (e2.code !== "ENOENT") throw e2; }
       }
     }
     await sleep(200);

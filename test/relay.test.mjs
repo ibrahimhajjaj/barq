@@ -69,6 +69,11 @@ test("the relay refuses web pages and callers without its token, and never close
   assert.equal((await raw(relay.url, { id: 1, method: "Browser.getVersion" }, { Origin: "https://evil.example" })).status, 403);
   assert.match((await raw(relay.url, { id: 7, method: "Browser.getVersion" })).result.product, /Chrome/);
   assert.equal((await raw(relay.url, { id: 2, method: "Target.getTargets", sessionId: "not-mine" })).error.code, -32001);
+  // nonsense is ignored, and the relay keeps serving
+  for (const junk of ["null", "[]", "42", '{"id":"x","method":"Browser.getVersion"}', '{"id":1}', '{"id":1,"method":"Browser.getVersion","sessionId":7}']) {
+    await new Promise(resolve => { const ws = new WebSocket(relay.url); ws.once("open", () => { ws.send(junk); setTimeout(() => { ws.close(); resolve(); }, 100); }); });
+  }
+  assert.match((await raw(relay.url, { id: 8, method: "Browser.getVersion" })).result.product, /Chrome/);
   assert.deepEqual(await raw(relay.url, { id: 3, method: "Browser.close" }), { id: 3, result: {} });
   assert.deepEqual(await raw(relay.url, { id: 4, method: "Browser.crash" }), { id: 4, result: {} });
   await sleep(500);
