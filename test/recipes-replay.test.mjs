@@ -295,6 +295,40 @@ test("a held flow whose next step is gone goes on in the loop and isn't recorded
   assert.deepEqual(notes, []);
 });
 
+test("a flow held at a confirmation stop goes on only with the same values on the same address", async t => {
+  const MAIL = `<input placeholder="To"><button onclick="document.body.dataset.sent = (document.body.dataset.sent ?? '') + document.querySelector('input').value + ';'">Send</button>`;
+  const { b } = await session(t, MAIL);
+  const send = (page, history) => !did(history, "To") ? answer({ tool: "type", target: el(page, e => e.placeholder === "To"), value: "recipient" })
+    : !did(history, "Send") ? answer({ target: el(page, e => e.text === "Send") }) : finished(0.95);
+  const sent = () => b.page.evaluate(() => document.body.dataset.sent);
+  jev(b, send);
+  assert.equal((await b.do("Send the message", { values: { recipient: "alice" }, allowIrreversible: true })).recipe, "recorded");
+
+  // the replay types alice and stops before Send
+  await b.page.setContent(MAIL);
+  jev(b, () => finished(0.95));
+  assert.equal((await b.do("Send the message", { values: { recipient: "alice" } })).status, "needs_confirmation");
+  assert.equal(await b.page.inputValue("input"), "alice");
+  // allowed, but for bob: nothing of the held flow replays, Jev starts over
+  let n = jev(b, send);
+  let r = await b.do("Send the message", { values: { recipient: "bob" }, allowIrreversible: true });
+  assert.equal(r.status, "done", r.info);
+  assert.equal(r.recipe, undefined);
+  assert.deepEqual(n.histories[0], []);
+  assert.equal(await sent(), "bob;", "never the draft typed for alice");
+
+  // the same values on another address (another draft): no going on either
+  await b.page.setContent(MAIL);
+  jev(b, () => finished(0.95));
+  assert.equal((await b.do("Send the message", { values: { recipient: "alice" } })).status, "needs_confirmation");
+  await b.page.evaluate(() => { location.hash = "draft=2"; });
+  n = jev(b, send);
+  r = await b.do("Send the message", { values: { recipient: "alice" }, allowIrreversible: true });
+  assert.equal(r.recipe, undefined);
+  assert.deepEqual(n.histories[0], []);
+  assert.equal(await sent(), "alice;");
+});
+
 test("a confirm dialog opened by a replayed action is handed back as in the loop", async t => {
   const CLEAN = `<button onclick="document.body.dataset.c = confirm('Permanently delete 3 files?')">Clean up</button>`;
   const { b } = await session(t, CLEAN);

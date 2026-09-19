@@ -44,6 +44,12 @@ export function fingerprint(text, values) {
   return createHash("sha256").update(maskValues(text, values).normalize("NFC").replace(/\s+/g, " ").trim()).digest("hex").slice(0, 16);
 }
 
+// A hash of values exactly as given, names and contents, for telling in memory whether a later
+// call was given the same ones. Never stored: short values would be easy to guess back from it.
+export function valuesPrint(values = {}) {
+  return createHash("sha256").update(JSON.stringify(Object.keys(values).sort().map(k => [k, String(values[k])]))).digest("hex");
+}
+
 // Whether live text is what a fingerprint was taken of: as it reads, or with the current values
 // in it masked (then the recorded text held the values it was recorded with in their place).
 export function matches(text, print, values) {
