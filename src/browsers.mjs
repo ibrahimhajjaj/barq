@@ -94,17 +94,24 @@ export async function findEndpoint(spec = "auto", opts = {}) {
   throw new Error(`${which} has remote debugging on${stale}. Start the browser, open ${inspectPage(spec === "auto" ? "chrome" : spec)} and tick "Allow remote debugging for this browser instance".`);
 }
 
+// The helper extension in extension/ (its manifest key pins this id). Loaded unpacked once per
+// browser, it lets the agent keep its tabs in a named tab group, which the DevTools protocol can't do.
+export const HELPER_EXTENSION_ID = "cbkdahgldeliodgkkmlmkmakamfoejec";
+export const GROUP_COLORS = ["grey", "blue", "red", "yellow", "green", "pink", "purple", "cyan", "orange"];
+
 // A browser the user already runs. Every tab the agent needs is created here, and only those and
 // the tabs they open are ever closed; disposing disconnects and leaves the browser and the user's
 // own tabs alone.
 //
 // placement:
+//   "group"  a tab group in the user's current window (needs the helper extension)
 //   "window" a separate window that doesn't take focus; tabs the agent's pages open land there too
 //   "tab"    a plain background tab in the user's current window
+//   "auto"   "group" when the helper extension is installed, otherwise "window"
 export class AttachedBrowser {
   kind = "attach";
 
-  static async connect(spec = "auto", { placement = "window", size = { width: 1280, height: 800 }, allowTimeoutMs = 120_000 } = {}) {
+  static async connect(spec = "auto", { placement = "auto", group = {}, size = { width: 1280, height: 800 }, allowTimeoutMs = 120_000 } = {}) {
     const endpoint = await findEndpoint(spec);
     let browser;
     try {
@@ -117,13 +124,16 @@ export class AttachedBrowser {
       if (/timeout/i.test(String(e.message))) throw new Error(`Connecting to ${endpoint.name} took longer than ${Math.round(allowTimeoutMs / 1000)}s. If it shows an "Allow remote debugging" prompt, click Allow; otherwise one of its tabs may be hung. Then retry.`);
       throw e;
     }
-    return new AttachedBrowser(browser, endpoint, { placement, size });
+    return new AttachedBrowser(browser, endpoint, { placement, group, size });
   }
 
-  constructor(browser, endpoint, { placement = "window", size = { width: 1280, height: 800 } } = {}) {
+  constructor(browser, endpoint, { placement = "auto", group = {}, size = { width: 1280, height: 800 } } = {}) {
     this.browser = browser; this.endpoint = endpoint; this.placement = placement; this.size = size;
+    this.group = { title: "Agent", color: "purple", collapsed: true, ...group };
+    if (!GROUP_COLORS.includes(this.group.color)) this.group.color = "purple";
     this.context = browser.contexts()[0];
     this.owned = new Set();
+    this.helperMissedAt = placement === "window" || placement === "tab" ? Infinity : 0;
     // With no dialog listener at all, Playwright answers every dialog in every tab it is attached
     // to, the user's included: confirm() returns false and "Leave site?" is accepted. A listener
     // that does nothing leaves the user's dialogs to the user; the agent's tabs answer their own.
@@ -139,8 +149,8 @@ export class AttachedBrowser {
   isAlive() { return this.browser.isConnected(); }
 
   // noDefaults leaves focus emulation off, so turn it on for the agent's tabs only: a background
-  // tab otherwise stops rendering frames, and actions wait on frames. The CDP session has to stay
-  // open, since detaching it undoes the emulation.
+  // or collapsed tab otherwise stops rendering frames, and actions wait on frames. The CDP session
+  // has to stay open, since detaching it undoes the emulation.
   async own(p) {
     if (this.owned.has(p)) return p;
     this.owned.add(p);
@@ -150,8 +160,41 @@ export class AttachedBrowser {
     return p;
   }
 
-  newTab() {
-    return this.createTab(this.placement === "tab" ? [{ background: true }] : [{ newWindow: true, focus: false, ...this.size }, { background: true }]);
+  // The helper extension's service worker. The worker listens for new tabs, so creating the
+  // agent's tab wakes it if the browser had stopped it.
+  async helper(timeout = 5000) {
+    const ours = w => w.url().startsWith(`chrome-extension://${HELPER_EXTENSION_ID}/`);
+    return this.context.serviceWorkers().find(ours)
+      ?? await this.context.waitForEvent("serviceworker", { predicate: ours, timeout }).catch(() => null);
+  }
+
+  async newTab({ session = "main" } = {}) {
+    // After a miss, look for the helper again only once a minute: each look can cost seconds.
+    const tryGroup = this.placement === "group" || (this.placement === "auto" && Date.now() - this.helperMissedAt > 60_000);
+    if (!tryGroup) return this.createTab(this.placement === "tab" ? [{ background: true }] : [{ newWindow: true, focus: false, ...this.size }, { background: true }]);
+
+    const page = await this.createTab([{ background: true }]);
+    const sw = await this.helper();
+    if (sw) {
+      try {
+        const title = session === "main" ? this.group.title : `${this.group.title} · ${session}`;
+        await sw.evaluate(args => self.jevGroup(args), { marker: this.markers.get(page), session, ...this.group, title });
+        return page;
+      } catch (e) {
+        // no tab-group API (some Chromium browsers), a window that can't hold groups, ...
+        await page.close().catch(() => {});
+        if (this.placement === "group") throw new Error(`Couldn't put the tab in a group: ${String(e.message).split("\n")[0]}`);
+        this.helperMissedAt = Date.now();
+        return this.newTab({ session });
+      }
+    }
+    await page.close().catch(() => {});
+    if (this.placement === "group") {
+      throw new Error(`The helper extension isn't loaded in ${this.name}. Load the extension/ folder of jev-browser unpacked (${this.name.startsWith("edge") ? "edge" : "chrome"}://extensions, Developer mode, Load unpacked), or use placement "window".`);
+    }
+    // No helper: a tab in the user's window could have a popup take over their screen, so use a window instead.
+    this.helperMissedAt = Date.now();
+    return this.newTab({ session });
   }
 
   // Tries each set of Target.createTarget options in turn (headless builds refuse some of them).
@@ -169,7 +212,7 @@ export class AttachedBrowser {
       const deadline = Date.now() + 10_000;
       while (Date.now() < deadline) {
         const page = this.context.pages().find(p => !this.owned.has(p) && p.url().endsWith(marker));
-        if (page) return this.own(page);
+        if (page) { (this.markers ??= new WeakMap()).set(page, marker); return this.own(page); }
         await sleep(25);
       }
       await cdp.send("Target.closeTarget", { targetId }).catch(() => {});
@@ -220,10 +263,16 @@ export class LaunchedBrowser {
 }
 
 // JEV_BROWSER_ATTACH=chrome|edge|brave|...|auto|<dir>|<url> drives a running browser
-// (JEV_BROWSER_PLACEMENT=window|tab); otherwise a browser is launched (JEV_BROWSER_CHANNEL=chrome|msedge,
-// JEV_BROWSER_PROFILE, JEV_BROWSER_HEADED=1).
+// (JEV_BROWSER_PLACEMENT=auto|group|window|tab, JEV_BROWSER_GROUP_TITLE, JEV_BROWSER_GROUP_COLOR);
+// otherwise a browser is launched (JEV_BROWSER_CHANNEL=chrome|msedge, JEV_BROWSER_PROFILE, JEV_BROWSER_HEADED=1).
 export function browserConfig(env = process.env) {
-  if (env.JEV_BROWSER_ATTACH) return { kind: "attach", spec: env.JEV_BROWSER_ATTACH, placement: env.JEV_BROWSER_PLACEMENT === "tab" ? "tab" : "window" };
+  if (env.JEV_BROWSER_ATTACH) {
+    const placement = ["group", "window", "tab"].includes(env.JEV_BROWSER_PLACEMENT) ? env.JEV_BROWSER_PLACEMENT : "auto";
+    const group = {};
+    if (env.JEV_BROWSER_GROUP_TITLE) group.title = env.JEV_BROWSER_GROUP_TITLE;
+    if (env.JEV_BROWSER_GROUP_COLOR) group.color = env.JEV_BROWSER_GROUP_COLOR;
+    return { kind: "attach", spec: env.JEV_BROWSER_ATTACH, placement, group };
+  }
   return { kind: "launch", headed: env.JEV_BROWSER_HEADED === "1", channel: env.JEV_BROWSER_CHANNEL || undefined, userDataDir: env.JEV_BROWSER_PROFILE || undefined };
 }
 

@@ -1,0 +1,17 @@
+{
+  "manifest_version": 3,
+  "name": "Jev Browser tabs",
+  "version": "0.1.0",
+  "description": "Keeps an automation agent's tabs in a tab group of their own and out of your way.",
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAvXptB/fdjg1RQG1a0Pt+Inf0qAeXIuPPScPlYOkM2fQmMEQ24OoKd4qr+AdK8Z7tEgyGTMYWMobK/CG22HeVb7tSD43D+jRqazrGQMMoyLonxBMRsLubSfTzMHkmORcRgRPNg/wToo7x+E5x6Bf2OXh79061FqGt0SNEAtffV6XWGoJP+RG7H8/Y24d8umUDHzn6FSfOfv3/mtDxwZfpOjuK5UPwg2Cs/oWSLcULgFM+qtbBJA4iLhQdj0ghrY9dUgG0jQrRtH+DwMA4q5Y/qgt97voEJ1vFyzx56B/nJCqA72rE+uVWZS6G0On9u1tJ0dT/zhz7TKZ6Ac8t4sUNEQIDAQAB",
+  "minimum_chrome_version": "116",
+  "permissions": [
+    "tabs",
+    "tabGroups",
+    "storage",
+    "webNavigation"
+  ],
+  "background": {
+    "service_worker": "sw.js"
+  }
+}
