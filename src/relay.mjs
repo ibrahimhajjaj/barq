@@ -24,6 +24,7 @@ const IDLE_MS = Number(process.env.JEV_BROWSER_RELAY_IDLE_MIN ?? 30) * 60_000;
 const MAX_MESSAGE = 512 * 1024 * 1024;   // screenshots and page captures can be large
 
 export function stateDir({ platform = process.platform, env = process.env, home = os.homedir() } = {}) {
+  if (env.JEV_BROWSER_STATE_DIR) return env.JEV_BROWSER_STATE_DIR;
   if (platform === "darwin") return path.join(home, "Library", "Caches", "jev-browser");
   if (platform === "win32") return path.join(env.LOCALAPPDATA ?? path.join(home, "AppData", "Local"), "jev-browser");
   return path.join(env.XDG_RUNTIME_DIR || env.XDG_CACHE_HOME || path.join(home, ".cache"), "jev-browser");

@@ -16,6 +16,8 @@ import { JevBrowser } from "../src/session.mjs";
 const sleep = ms => new Promise(done => setTimeout(done, ms));
 const EXTENSION = join(dirname(fileURLToPath(import.meta.url)), "..", "extension");
 const tmp = () => mkdtempSync(join(tmpdir(), "jev-browser-test-"));
+// the relays these tests start keep their state and log here, not in the user's own folder
+process.env.JEV_BROWSER_STATE_DIR = tmp();
 // polls until check() returns something truthy, for state that settles asynchronously
 async function until(check, ms = 5000) {
   const deadline = Date.now() + ms;
