@@ -122,8 +122,36 @@ test("a replayed action on a control that pays waits for allow_irreversible, wit
   assert.equal(r.pending.because, '"Pay"');
   assert.equal(await b.page.evaluate(() => document.body.dataset.paid), undefined);
   assert.deepEqual([n.decide, n.call, r.actions.length, notes.length], [0, 0, 0, 0]);
-  // allowed, it replays
+  // allowed, the call goes on in the loop from where it stopped: a replay would start over
+  // from the first action, and whatever ran before the stop would run twice
+  const again = jev(b, (page, history) => !did(history, "Pay") ? answer({ target: el(page, e => e.text === "Pay now") }) : finished(0.95));
+  const r2 = await b.do("Finish the purchase", { allowIrreversible: true });
+  assert.equal(r2.status, "done");
+  assert.equal(r2.recipe, undefined, "neither replayed nor recorded");
+  assert.ok(again.decide > 0);
+  assert.equal(await b.page.evaluate(() => document.body.dataset.paid), "yes");
+  // a fresh start replays again
+  await b.page.setContent(PAY);
+  jev(b, () => finished(0.95));
   assert.equal((await b.do("Finish the purchase", { allowIrreversible: true })).recipe, "replayed");
+});
+
+test("going on after a confirmation stop never repeats what ran before it", async t => {
+  // one page that never changes address: add to the cart, then pay
+  const SHOP = `<button onclick="document.body.dataset.cart = +(document.body.dataset.cart || 0) + 1">Add to cart</button>
+    <button onclick="document.body.dataset.paid = 'yes'">Pay now</button>`;
+  const { b } = await session(t, SHOP);
+  const flow = (page, history) => !did(history, "Add to cart") ? answer({ target: el(page, e => e.text === "Add to cart") })
+    : !did(history, "Pay") ? answer({ target: el(page, e => e.text === "Pay now") }) : finished(0.95);
+  jev(b, flow);
+  assert.equal((await b.do("Buy the mug", { allowIrreversible: true })).recipe, "recorded");
+  await b.page.setContent(SHOP);
+  jev(b, () => finished(0.95));
+  assert.equal((await b.do("Buy the mug")).status, "needs_confirmation", "the replay adds to the cart, then stops at Pay");
+  assert.equal(await b.page.evaluate(() => document.body.dataset.cart), "1");
+  jev(b, (page, history) => !did(history, "Pay") ? answer({ target: el(page, e => e.text === "Pay now") }) : finished(0.95));
+  await b.do("Buy the mug", { allowIrreversible: true });
+  assert.equal(await b.page.evaluate(() => document.body.dataset.cart), "1", "the mug is in the cart once");
   assert.equal(await b.page.evaluate(() => document.body.dataset.paid), "yes");
 });
 
