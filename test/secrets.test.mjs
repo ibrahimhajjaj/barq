@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 import http from "node:http";
 import { chromium } from "playwright";
 import { isSecret, forJev, resolveValue } from "../src/secrets.mjs";
-import { JevBrowser } from "../src/session.mjs";
+import { Barq } from "../src/session.mjs";
 import { formatPage } from "../src/page-model.mjs";
 import { RecipeBook } from "../src/recipes.mjs";
 import { mkdtempSync, rmSync } from "node:fs";
@@ -36,7 +36,7 @@ test("references resolve at the last moment: env, keychain, Bitwarden, with clea
 });
 
 test("what is typed into a password field never comes back from the page, only that it is filled", async () => {
-  const b = await JevBrowser.launch({ browser });   // shares the one Chromium
+  const b = await Barq.launch({ browser });
   await b.page.setContent(`<label>Email <input id=e name=email></label><label>Password <input id=p type=password name=pw></label>
     <label>One-time code <input id=o autocomplete=one-time-code></label><label>Shipping <input id=s name=shipping_pin_code></label>`);
   await b.page.fill("#e", "a@b.com"); await b.page.fill("#p", "hunter22"); await b.page.fill("#o", "123456"); await b.page.fill("#s", "11511");
@@ -49,7 +49,7 @@ test("what is typed into a password field never comes back from the page, only t
 });
 
 test("Jev sees value names, the field gets the real value, and results carry names only", async () => {
-  const b = await JevBrowser.launch({ browser });   // shares the one Chromium
+  const b = await Barq.launch({ browser });
   await b.page.setContent(`<label>Password <input id=p type=password></label>`);
   const i = (await b.snapshot()).elements[0].i;
   // stands in for the Jev API: records every request, answers "type the password", then "done"
@@ -78,7 +78,7 @@ test("Jev sees value names, the field gets the real value, and results carry nam
 });
 
 test("autofill waits for the browser to fill the field, and says so when it doesn't", async () => {
-  const b = await JevBrowser.launch({ browser });   // shares the one Chromium
+  const b = await Barq.launch({ browser });
   // stands in for a password manager that fills on user input
   await b.page.setContent(`<input id=u onfocus="setTimeout(() => this.value = 'filled-by-manager', 300)"><input id=v>`);
   const [u, v] = (await b.snapshot()).elements.map(e => e.i);
@@ -123,7 +123,7 @@ async function menuPage(t, logins) {
   isolated ??= await chromium.launch({ args: ["--site-per-process"] });
   const server = http.createServer((req, res) => { res.setHeader("content-type", "text/html"); res.end(req.url.startsWith("/overlay/") ? MENU : LOGIN(logins)); });
   await new Promise(r => server.listen(0, r));
-  const b = await JevBrowser.launch({ browser: isolated });
+  const b = await Barq.launch({ browser: isolated });
   t.after(async () => { await b.close(); server.closeAllConnections(); server.close(); });
   b.passwordMenu = /\/overlay\/menu-list\.html/;
   await b.open(`http://localhost:${server.address().port}/`);

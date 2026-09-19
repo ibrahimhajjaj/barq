@@ -3,7 +3,7 @@
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
 import http from "node:http";
-import { JevBrowser } from "../src/session.mjs";
+import { Barq } from "../src/session.mjs";
 import { LaunchedBrowser } from "../src/browsers.mjs";
 
 const SHOP = `<!doctype html><title>Shop</title><body><h1>Shop</h1><script>
@@ -30,7 +30,7 @@ before(async () => {
   await new Promise(r => server.listen(0, r));
   base = `http://localhost:${server.address().port}`;
   host = await LaunchedBrowser.launch();
-  b = await JevBrowser.forPage(await host.newTab());
+  b = await Barq.forPage(await host.newTab());
 });
 after(async () => { await host.dispose(); server.close(); });
 

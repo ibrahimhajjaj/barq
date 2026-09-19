@@ -11,7 +11,7 @@ import { findEndpoint } from "../src/browsers.mjs";
 import { startRelay, relayEndpoint, stateFile } from "../src/relay.mjs";
 
 const sleep = ms => new Promise(done => setTimeout(done, ms));
-const tmp = () => mkdtempSync(join(tmpdir(), "jev-browser-relay-"));
+const tmp = () => mkdtempSync(join(tmpdir(), "barq-relay-"));
 const cleanups = [];
 after(async () => { for (const f of cleanups.reverse()) await f(); });
 

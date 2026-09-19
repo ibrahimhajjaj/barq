@@ -1,6 +1,6 @@
 # A tag named after the version puts that version on npm. To release: npm version patch, then git push --follow-tags.
 # npm trusts this workflow directly (OIDC), so GitHub holds no npm token. Set up once with:
-#   npx npm@latest trust github jev-browser --file release.yml --repo ibrahimhajjaj/barq --allow-publish
+#   npx npm@latest trust github barq --file release.yml --repo ibrahimhajjaj/barq --allow-publish
 name: Release
 
 on:
@@ -32,7 +32,7 @@ jobs:
       - name: Publish to npm
         run: |
           V=$(node -e 'console.log(require("./package.json").version)')
-          if npm view "jev-browser@$V" version > /dev/null 2>&1; then echo "jev-browser@$V is on npm already"; else npm publish --access public; fi
+          if npm view "barq@$V" version >/dev/null 2>&1; then echo "barq@$V is already on npm, skipping"; else npm publish --access public; fi
       - name: GitHub release
         env:
           GH_TOKEN: ${{ github.token }}

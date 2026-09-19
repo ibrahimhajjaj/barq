@@ -1,9 +1,9 @@
 {
   "mcpServers": {
-    "jev-browser": {
+    "barq": {
       "command": "npx",
-      "args": ["--yes", "--package", "jev-browser", "jev-browser-mcp"],
-      "env": { "JEV_BROWSER_HEADED": "0", "TYPESAFE_API_KEY": "<your TypeSafe key>" }
+      "args": ["-y", "-p", "barq", "barq-mcp"],
+      "env": { "TYPESAFE_API_KEY": "your-typesafe-api-key", "BARQ_HEADED": "0" }
     }
   }
 }

@@ -1,9 +1,9 @@
 ---
-name: jev-browser
-description: Drive a web browser fast through the jev-browser MCP tools (browser_open, browser_do, browser_read, browser_check...). Use for any task that needs a real browser: going to a site, logging in, filling forms, clicking through a flow, reading or checking what a page says, or testing a web app. Prefer it over screenshot-driven browsing for multi-step flows.
+name: barq
+description: Drive a web browser fast through the barq MCP tools (browser_open, browser_do, browser_read, browser_check...). Use for any task that needs a real browser: going to a site, logging in, filling forms, clicking through a flow, reading or checking what a page says, or testing a web app. Prefer it over screenshot-driven browsing for multi-step flows.
 ---
 
-# jev-browser
+# barq
 
 You plan; a small decision model (Jev) does each click and keystroke in about 300 ms. You never
 need to read page dumps unless a step hands control back to you.
@@ -60,7 +60,7 @@ independent tasks; `browser_sessions` lists them and `browser_close` closes one 
 
 ## In the user's own browser
 
-When the server is set to attach (`JEV_BROWSER_ATTACH`, or the plugin's browser option), the
+When the server is set to attach (`BARQ_ATTACH`, or the plugin's browser option), the
 agent works inside the user's running Chrome or Edge with their logins. Its tabs sit in a
 collapsed tab group named after the project (with the helper extension) or in a separate window, and never take
 over the user's tab. The browser asks the user to "Allow" remote debugging once per browser run

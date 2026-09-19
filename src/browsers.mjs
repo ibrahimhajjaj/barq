@@ -123,7 +123,7 @@ export class AttachedBrowser {
     // session, a restart) doesn't ask again. Straight to the browser when the relay is off or
     // can't run here.
     let url = endpoint.ws;
-    if (process.env.JEV_BROWSER_RELAY !== "0") {
+    if (process.env.BARQ_RELAY !== "0") {
       try { url = await relayEndpoint(endpoint.ws, { timeoutMs: allowTimeoutMs }); }
       catch (e) {
         if (e.code === "RELAY_TIMEOUT") throw slow();
@@ -246,7 +246,7 @@ export class AttachedBrowser {
     }
     await page.close().catch(() => {});
     if (this.placement === "group") {
-      throw new Error(`The helper extension isn't loaded in ${this.name}. Load the extension/ folder of jev-browser unpacked (${this.name.startsWith("edge") ? "edge" : "chrome"}://extensions, Developer mode, Load unpacked), or use placement "window".`);
+      throw new Error(`The helper extension isn't loaded in ${this.name}. Load the extension/ folder of barq unpacked (${this.name.startsWith("edge") ? "edge" : "chrome"}://extensions, Developer mode, Load unpacked), or use placement "window".`);
     }
     // No helper: a tab in the user's window could have a popup take over their screen, so use a window instead.
     this.helperMissedAt = Date.now();
@@ -333,9 +333,9 @@ export class LaunchedBrowser {
   }
 }
 
-// JEV_BROWSER_ATTACH=chrome|edge|brave|...|auto|<dir>|<url> drives a running browser ("launch" or unset: don't)
-// (JEV_BROWSER_PLACEMENT=auto|group|window|tab, JEV_BROWSER_GROUP_TITLE, JEV_BROWSER_GROUP_COLOR);
-// otherwise a browser is launched (JEV_BROWSER_CHANNEL=chrome|msedge, JEV_BROWSER_PROFILE, JEV_BROWSER_HEADED=1).
+// BARQ_ATTACH=chrome|edge|brave|...|auto|<dir>|<url> drives a running browser ("launch" or unset: don't)
+// (BARQ_PLACEMENT=auto|group|window|tab, BARQ_GROUP_TITLE, BARQ_GROUP_COLOR);
+// otherwise a browser is launched (BARQ_CHANNEL=chrome|msedge, BARQ_PROFILE, BARQ_HEADED=1).
 // The name of the project the agent works in (its folder), which names its tab group, so tabs
 // from agents in different projects are told apart at a glance.
 export function projectLabel(dir, home = homedir()) {
@@ -346,15 +346,15 @@ export function projectLabel(dir, home = homedir()) {
 export function browserConfig(env = process.env, cwd = process.cwd()) {
   // an unset plugin setting can arrive as its literal "${...}" placeholder
   env = Object.fromEntries(Object.entries(env).filter(([, v]) => typeof v === "string" && !v.startsWith("${")));
-  if (env.JEV_BROWSER_ATTACH && env.JEV_BROWSER_ATTACH !== "launch") {
-    const placement = ["group", "window", "tab"].includes(env.JEV_BROWSER_PLACEMENT) ? env.JEV_BROWSER_PLACEMENT : "auto";
+  if (env.BARQ_ATTACH && env.BARQ_ATTACH !== "launch") {
+    const placement = ["group", "window", "tab"].includes(env.BARQ_PLACEMENT) ? env.BARQ_PLACEMENT : "auto";
     const group = {};
-    const title = env.JEV_BROWSER_GROUP_TITLE || projectLabel(env.CLAUDE_PROJECT_DIR || cwd);
+    const title = env.BARQ_GROUP_TITLE || projectLabel(env.CLAUDE_PROJECT_DIR || cwd);
     if (title) group.title = title;
-    if (env.JEV_BROWSER_GROUP_COLOR) group.color = env.JEV_BROWSER_GROUP_COLOR;
-    return { kind: "attach", spec: env.JEV_BROWSER_ATTACH, placement, group };
+    if (env.BARQ_GROUP_COLOR) group.color = env.BARQ_GROUP_COLOR;
+    return { kind: "attach", spec: env.BARQ_ATTACH, placement, group };
   }
-  return { kind: "launch", headed: env.JEV_BROWSER_HEADED === "1", channel: env.JEV_BROWSER_CHANNEL || undefined, userDataDir: env.JEV_BROWSER_PROFILE || undefined };
+  return { kind: "launch", headed: env.BARQ_HEADED === "1", channel: env.BARQ_CHANNEL || undefined, userDataDir: env.BARQ_PROFILE || undefined };
 }
 
 export function openBrowser(config = browserConfig()) {

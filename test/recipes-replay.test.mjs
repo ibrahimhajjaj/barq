@@ -6,7 +6,7 @@ import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { chromium } from "playwright";
-import { JevBrowser } from "../src/session.mjs";
+import { Barq } from "../src/session.mjs";
 import { RecipeBook, recipeKey } from "../src/recipes.mjs";
 
 let browser;
@@ -19,7 +19,7 @@ async function session(t, html) {
   const book = new RecipeBook({ file: join(dir, "recipes.json") });
   const notes = [], note = book.note.bind(book);
   book.note = (key, n) => { notes.push(n); note(key, n); };
-  const b = await JevBrowser.launch({ browser, recipes: book });
+  const b = await Barq.launch({ browser, recipes: book });
   t.after(async () => { await b.close(); rmSync(dir, { recursive: true, force: true }); });
   await b.page.setContent(html, { waitUntil: "load" });
   return { b, book, notes, file: book.file };

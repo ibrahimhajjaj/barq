@@ -6,10 +6,10 @@ import { join } from "node:path";
 import { TraceLog, traceDir, redact } from "../src/trace.mjs";
 
 test("trace directories follow each platform's convention and can be turned off", () => {
-  assert.match(traceDir({}, "darwin"), /Library\/Logs\/jev-browser$/);
-  assert.match(traceDir({ XDG_STATE_HOME: "/s" }, "linux"), /^\/s\/jev-browser\/traces$/);
-  assert.equal(traceDir({ JEV_BROWSER_TRACES: "0" }, "darwin"), null);
-  assert.equal(traceDir({ JEV_BROWSER_TRACES: "/t" }, "darwin"), "/t");
+  assert.match(traceDir({}, "darwin"), /Library\/Logs\/barq$/);
+  assert.match(traceDir({ XDG_STATE_HOME: "/s" }, "linux"), /^\/s\/barq\/traces$/);
+  assert.equal(traceDir({ BARQ_TRACES: "0" }, "darwin"), null);
+  assert.equal(traceDir({ BARQ_TRACES: "/t" }, "darwin"), "/t");
 });
 
 test("secret values are redacted wherever they appear; other values stay", () => {

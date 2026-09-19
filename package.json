@@ -1,8 +1,9 @@
 {
-  "name": "jev-browser",
-  "version": "0.1.1",
-  "description": "A browser an agent can hand one outcome at a time, with Jev (TypeSafe System One) choosing every click. As a library, a CLI and an MCP server.",
+  "name": "barq",
+  "version": "0.2.0",
+  "description": "Fast browser hands for coding agents: the agent names an outcome, Jev (TypeSafe's decision model) picks each click in about 300 ms. MCP server, Claude Code plugin, library and CLI; works in a browser it launches or in your own Chrome or Edge.",
   "keywords": [
+    "barq",
     "mcp",
     "mcp-server",
     "browser-automation",
@@ -29,8 +30,8 @@
     ".": "./src/index.mjs"
   },
   "bin": {
-    "jev-browser": "./bin/jev-browser.mjs",
-    "jev-browser-mcp": "./bin/jev-browser-mcp.mjs"
+    "barq": "bin/barq.mjs",
+    "barq-mcp": "bin/barq-mcp.mjs"
   },
   "files": [
     "src/",
@@ -48,7 +49,7 @@
     "test:e2e": "node ./test/mcp.e2e.mjs",
     "bench": "node ./bench/run.mjs",
     "bench:cost": "node ./bench/context-cost.mjs",
-    "mcp": "node ./bin/jev-browser-mcp.mjs",
+    "mcp": "node bin/barq-mcp.mjs",
     "setup": "playwright install chromium"
   },
   "engines": {

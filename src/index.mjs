@@ -1,4 +1,4 @@
-export { JevBrowser, TOOLS, KEYS } from "./session.mjs";
+export { Barq, TOOLS, KEYS } from "./session.mjs";
 export { runFlow } from "./flow.mjs";
 export { RecipeBook } from "./recipes.mjs";
 export { jev, apiKey } from "./jev.mjs";

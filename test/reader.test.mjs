@@ -81,9 +81,9 @@ test("findPassages ranks across batches and reports when nothing answers", async
   assert.deepEqual(none.passages, []);
 });
 
-test("JevBrowser.read pages through the text and answers a question with passages", async () => {
-  const { JevBrowser } = await import("../src/session.mjs");
-  const b = await JevBrowser.launch({ browser });   // shares the one Chromium
+test("Barq.read pages through the text and answers a question with passages", async () => {
+  const { Barq } = await import("../src/session.mjs");
+  const b = await Barq.launch({ browser });
   await b.page.setContent(FIXTURE, { waitUntil: "load" });
   const all = await b.read({ maxChars: 60 });
   assert.equal(all.offset, 0);

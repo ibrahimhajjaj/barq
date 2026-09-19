@@ -11,13 +11,13 @@ import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { chromium } from "playwright";
 import { findEndpoint, userDataDir, inspectPage, readActivePort, projectLabel, browserConfig, AttachedBrowser, HELPER_EXTENSION_ID, HELPER_VERSION } from "../src/browsers.mjs";
-import { JevBrowser } from "../src/session.mjs";
+import { Barq } from "../src/session.mjs";
 
 const sleep = ms => new Promise(done => setTimeout(done, ms));
 const EXTENSION = join(dirname(fileURLToPath(import.meta.url)), "..", "extension");
-const tmp = () => mkdtempSync(join(tmpdir(), "jev-browser-test-"));
+const tmp = () => mkdtempSync(join(tmpdir(), "barq-test-"));
 // the relays these tests start keep their state and log here, not in the user's own folder
-process.env.JEV_BROWSER_STATE_DIR = tmp();
+process.env.BARQ_STATE_DIR = tmp();
 // polls until check() returns something truthy, for state that settles asynchronously
 async function until(check, ms = 5000) {
   const deadline = Date.now() + ms;
@@ -102,7 +102,7 @@ test("attached: tabs go in a group, a popup joins it and the user keeps their ta
   const chrome = await startBrowser({ extension: true });
   try {
     const host = await AttachedBrowser.connect(chrome.dir);
-    const jb = await JevBrowser.forPage(await host.newTab({ session: "main" }));
+    const jb = await Barq.forPage(await host.newTab({ session: "main" }));
     await jb.open(`${base}/agent`);
     await jb.page.click("#l");
     await jb.settle();
@@ -133,8 +133,8 @@ test("attached: tabs go in a group, a popup joins it and the user keeps their ta
 test("groups are named after the agent's project; each connection keeps its own", async () => {
   assert.equal(projectLabel("/home/u/work/shop"), "shop");
   assert.equal(projectLabel("/home/u", "/home/u"), undefined, "no project: the default name");
-  assert.deepEqual(browserConfig({ JEV_BROWSER_ATTACH: "edge", CLAUDE_PROJECT_DIR: "/w/jev" }, "/elsewhere").group, { title: "jev" });
-  assert.deepEqual(browserConfig({ JEV_BROWSER_ATTACH: "edge", JEV_BROWSER_GROUP_TITLE: "Mine" }, "/w/jev").group, { title: "Mine" });
+  assert.deepEqual(browserConfig({ BARQ_ATTACH: "edge", CLAUDE_PROJECT_DIR: "/w/jev" }, "/elsewhere").group, { title: "jev" });
+  assert.deepEqual(browserConfig({ BARQ_ATTACH: "edge", BARQ_GROUP_TITLE: "Mine" }, "/w/jev").group, { title: "Mine" });
 
   const chrome = await startBrowser({ extension: true });
   try {

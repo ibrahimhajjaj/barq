@@ -1,15 +1,15 @@
 #!/usr/bin/env node
 // MCP server (stdio): Jev-driven browser sessions for an LLM client.
 //
-//   claude mcp add jev-browser -- node <checkout>/bin/jev-browser-mcp.mjs
+//   claude mcp add barq -- node /path/to/barq/bin/barq-mcp.mjs
 //
 // Env: TYPESAFE_API_KEY (or the macOS keychain item "typesafe-api-key"),
-//      JEV_BROWSER_ATTACH=chrome|edge|brave|...|auto to work in a browser the user already runs,
-//      JEV_BROWSER_PLACEMENT=auto|group|window|tab for where the agent's tabs go in that browser,
-//      otherwise a launched Chromium: JEV_BROWSER_HEADED=1, JEV_BROWSER_CHANNEL=chrome|msedge,
-//      JEV_BROWSER_PROFILE=/dir (persistent profile, keeps logins),
-//      JEV_BROWSER_LOG=1 (rounds to stderr), JEV_BROWSER_TRACES=<dir>|0 (per-step records on disk),
-//      JEV_BROWSER_RECIPES=<file>|0 (steps that finished, replayed when repeated; 0 turns it off)
+//      BARQ_ATTACH=chrome|edge|brave|...|auto to work in a browser the user already runs,
+//      BARQ_PLACEMENT=auto|group|window|tab for where the agent's tabs go in that browser,
+//      otherwise a launched Chromium: BARQ_HEADED=1, BARQ_CHANNEL=chrome|msedge,
+//      BARQ_PROFILE=/dir (persistent profile, keeps logins),
+//      BARQ_LOG=1 (rounds to stderr), BARQ_TRACES=<dir>|0 (per-step records on disk),
+//      BARQ_RECIPES=<file>|0 (steps that finished, replayed when repeated; 0 turns it off)
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
@@ -21,7 +21,7 @@ import { TraceLog } from "../src/trace.mjs";
 const config = browserConfig();
 // Attached to the user's own browser, let go of it after a while without calls: while connected,
 // every one of their tabs reports to this process.
-const idleMin = Number(process.env.JEV_BROWSER_IDLE_MIN ?? (config.kind === "attach" ? 15 : 0));
+const idleMin = Number(process.env.BARQ_IDLE_MIN ?? (config.kind === "attach" ? 15 : 0));
 // A tool call gives up after 60 s. The browser's "Allow" prompt can take longer than that to be
 // answered, so the connection gives up first, with a message that says to click it; the prompt
 // stays up and the next call finds the connection ready.
@@ -29,8 +29,8 @@ const pool = new SessionPool({ open: () => openBrowser({ ...config, allowTimeout
 
 const text = value => ({ content: [{ type: "text", text: typeof value === "string" ? value : JSON.stringify(value, null, 1) }] });
 const fail = e => ({ isError: true, content: [{ type: "text", text: String(e?.message ?? e).split("\n", 1)[0] }] });
-const stderrLog = process.env.JEV_BROWSER_LOG === "1" ? line => process.stderr.write(`${line}\n`) : () => {};
-// one file per browser_do step, with every round's probabilities (JEV_BROWSER_TRACES=0 turns it off)
+const stderrLog = process.env.BARQ_LOG === "1" ? s => process.stderr.write(s + "\n") : () => {};
+// one file per browser_do step, with every round's probabilities (BARQ_TRACES=0 turns it off)
 const traces = new TraceLog();
 
 const session = z.string().regex(/^[\w.-]{1,40}$/).optional().describe("Browser session: its own tab. Calls on different sessions run in parallel, calls on one session run in order. Default \"main\"");
@@ -62,7 +62,7 @@ function tool(fn, timeoutMs = 60_000) {
   };
 }
 
-const server = new McpServer({ name: "jev-browser", version: "0.2.0" });
+const server = new McpServer({ name: "barq", version: "0.2.0" });
 
 server.registerTool("browser_open", {   // go to an address
   title: "Open URL",

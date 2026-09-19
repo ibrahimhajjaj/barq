@@ -1,0 +1,15 @@
+{
+  "name": "barq",
+  "description": "barq: fast browser hands for coding agents.",
+  "owner": {
+    "name": "Ibrahim Hajjaj",
+    "url": "https://github.com/ibrahimhajjaj"
+  },
+  "plugins": [
+    {
+      "name": "barq",
+      "source": "./",
+      "description": "Fast browser hands for coding agents: name an outcome, a small decision model does each click in about 300 ms, in a browser it launches or in your own Chrome or Edge."
+    }
+  ]
+}

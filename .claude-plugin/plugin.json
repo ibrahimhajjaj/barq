@@ -1,7 +1,7 @@
 {
-  "name": "jev-browser",
-  "version": "0.1.1",
-  "description": "A fast browser for coding agents: the agent says what outcome it wants, Jev (TypeSafe's decision model) picks each click in about 300 ms, Playwright acts. Works in a browser it launches or in your own running Chrome or Edge.",
+  "name": "barq",
+  "version": "0.2.0",
+  "description": "Fast browser hands for coding agents: name an outcome, and Jev (TypeSafe's decision model) picks each click in about 300 ms. Works in a browser it launches or in your own Chrome or Edge, with your logins, and keeps passwords out of the chat.",
   "author": {
     "name": "Ibrahim Hajjaj",
     "url": "https://github.com/ibrahimhajjaj"
@@ -45,15 +45,15 @@
     }
   },
   "mcpServers": {
-    "jev-browser": {
+    "barq": {
       "command": "node",
       "args": [
-        "${CLAUDE_PLUGIN_ROOT}/bin/jev-browser-mcp.mjs"
+        "${CLAUDE_PLUGIN_ROOT}/bin/barq-mcp.mjs"
       ],
       "env": {
         "TYPESAFE_API_KEY": "${user_config.typesafe_api_key}",
-        "JEV_BROWSER_ATTACH": "${user_config.browser}",
-        "JEV_BROWSER_PLACEMENT": "${user_config.placement}"
+        "BARQ_ATTACH": "${user_config.browser}",
+        "BARQ_PLACEMENT": "${user_config.placement}"
       }
     }
   }

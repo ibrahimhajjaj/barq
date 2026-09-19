@@ -20,14 +20,14 @@ import { WebSocket, WebSocketServer } from "ws";
 
 // The browser shows its "controlled by automated software" bar while the connection is open, so it
 // isn't kept for long once nobody uses it.
-const IDLE_MS = Number(process.env.JEV_BROWSER_RELAY_IDLE_MIN ?? 30) * 60_000;
+const IDLE_MS = Number(process.env.BARQ_RELAY_IDLE_MIN ?? 30) * 60_000;
 const MAX_MESSAGE = 512 * 1024 * 1024;   // screenshots and page captures can be large
 
 export function stateDir({ platform = process.platform, env = process.env, home = os.homedir() } = {}) {
-  if (env.JEV_BROWSER_STATE_DIR) return env.JEV_BROWSER_STATE_DIR;
-  if (platform === "darwin") return path.join(home, "Library", "Caches", "jev-browser");
-  if (platform === "win32") return path.join(env.LOCALAPPDATA ?? path.join(home, "AppData", "Local"), "jev-browser");
-  return path.join(env.XDG_RUNTIME_DIR || env.XDG_CACHE_HOME || path.join(home, ".cache"), "jev-browser");
+  if (env.BARQ_STATE_DIR) return env.BARQ_STATE_DIR;
+  if (platform === "darwin") return path.join(home, "Library", "Caches", "barq");
+  if (platform === "win32") return path.join(env.LOCALAPPDATA ?? path.join(home, "AppData", "Local"), "barq");
+  return path.join(env.XDG_RUNTIME_DIR || env.XDG_CACHE_HOME || path.join(home, ".cache"), "barq");
 }
 
 // One file per browser run: the browser's endpoint changes every time it starts.

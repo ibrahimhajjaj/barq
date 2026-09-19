@@ -8,11 +8,11 @@ import { join } from "node:path";
 const SECRET_KEY = /pass|pwd|pin|otp|2fa|mfa|token|secret|card|cvv|cvc|ssn|iban|security.?code/i;
 
 export function traceDir(env = process.env, platform = process.platform) {
-  if (env.JEV_BROWSER_TRACES === "0") return null;
-  if (env.JEV_BROWSER_TRACES) return env.JEV_BROWSER_TRACES;
-  if (platform === "darwin") return join(homedir(), "Library", "Logs", "jev-browser");
-  if (platform === "win32") return join(env.LOCALAPPDATA ?? join(homedir(), "AppData", "Local"), "jev-browser", "traces");
-  return join(env.XDG_STATE_HOME ?? join(homedir(), ".local", "state"), "jev-browser", "traces");
+  if (env.BARQ_TRACES === "0") return null;
+  if (env.BARQ_TRACES) return env.BARQ_TRACES;
+  if (platform === "darwin") return join(homedir(), "Library", "Logs", "barq");
+  if (platform === "win32") return join(env.LOCALAPPDATA ?? join(homedir(), "AppData", "Local"), "barq", "traces");
+  return join(env.XDG_STATE_HOME ?? join(homedir(), ".local", "state"), "barq", "traces");
 }
 
 // Replaces every occurrence of a secret value (by key name) anywhere in the record.

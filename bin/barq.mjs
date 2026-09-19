@@ -1,9 +1,9 @@
 #!/usr/bin/env node
-// usage: jev-browser run <flow.json>, with --headed, --json and --allow-irreversible as options
-//        jev-browser do <url> "<goal>" then key=value pairs, with --headed and --allow-irreversible
+// barq run <flow.json> [--headed] [--json] [--allow-irreversible]
+// barq do <url> "<goal>" [key=value ...] [--headed] [--allow-irreversible]
 import { readFileSync } from "node:fs";
 import { runFlow } from "../src/flow.mjs";
-import { JevBrowser } from "../src/session.mjs";
+import { Barq } from "../src/session.mjs";
 
 const argv = process.argv.slice(2);   // what follows `barq`
 const flag = name => argv.includes(name);
@@ -13,8 +13,8 @@ const allowIrreversible = flag("--allow-irreversible");   // go through orders, 
 
 const usage = () => {
   console.error(`usage:
-  jev-browser run <flow.json>   (options: --headed, --json, --allow-irreversible)
-  jev-browser do <url> "<goal>" key=value...   (options: --headed, --allow-irreversible)`);
+  barq run <flow.json> [--headed] [--json] [--allow-irreversible]
+  barq do <url> "<goal>" [key=value ...] [--headed] [--allow-irreversible]`);
   process.exit(2);
 };
 
@@ -27,7 +27,7 @@ if (pos[0] === "run" && pos[1]) {   // barq run flow.json
   process.exit(out.passed < out.steps ? 1 : 0);
 } else if (pos[0] === "do" && pos[1] && pos[2]) {
   const values = Object.fromEntries(pos.slice(3).map(pair => [pair.split("=")[0], pair.split("=").slice(1).join("=")]));
-  const b = await JevBrowser.launch({ slowMo: headed ? 300 : 0, headed });
+  const b = await Barq.launch({ headed, slowMo: headed ? 300 : 0 });
   try {
     await b.open(pos[1]);
     const r = await b.do(pos[2], { values, log: console.log, allowIrreversible });

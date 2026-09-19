@@ -6,7 +6,7 @@
 // the tab is kept if it still answers (a slow Jev request, say) and replaced if it doesn't. A tab
 // that closed or crashed between calls, or a browser that went away, is replaced on the next call,
 // which reopens the session's last URL.
-import { JevBrowser } from "./session.mjs";
+import { Barq } from "./session.mjs";
 import { openBrowser } from "./browsers.mjs";
 
 export class CallTimeout extends Error {}
@@ -109,7 +109,7 @@ export class SessionPool {
     const replacing = s.hadTab;
     await this.discard(s);
     const page = await host.newTab({ session: s.name });
-    s.jb = await JevBrowser.forPage(page, { highlight: this.highlight, front: host.front ? p => host.front(p) : null, recipes: this.recipes });
+    s.jb = await Barq.forPage(page, { highlight: this.highlight, front: host.front ? p => host.front(p) : null, recipes: this.recipes });
     s.host = host; s.hadTab = true;
     if (replacing && s.lastUrl) await s.jb.open(s.lastUrl).catch(() => {});
     return replacing;

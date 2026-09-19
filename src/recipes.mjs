@@ -8,12 +8,12 @@ import { homedir } from "node:os";
 import { join, dirname } from "node:path";
 
 export function recipeFile(env = process.env, platform = process.platform) {
-  if (env.JEV_BROWSER_RECIPES === "0") return null;
-  if (env.JEV_BROWSER_RECIPES) return env.JEV_BROWSER_RECIPES;
+  if (env.BARQ_RECIPES === "0") return null;
+  if (env.BARQ_RECIPES) return env.BARQ_RECIPES;
   const base = platform === "darwin" ? join(homedir(), "Library", "Application Support")
     : platform === "win32" ? (env.LOCALAPPDATA ?? join(homedir(), "AppData", "Local"))
     : (env.XDG_DATA_HOME ?? join(homedir(), ".local", "share"));
-  return join(base, "jev-browser", "recipes.json");
+  return join(base, "barq", "recipes.json");
 }
 
 // Where a step starts: origin and path, not the query or fragment (those carry search terms, ids).
