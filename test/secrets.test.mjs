@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 import http from "node:http";
 import { chromium } from "playwright";
 import { isSecret, forJev, resolveValue } from "../src/secrets.mjs";
-import { Barq } from "../src/session.mjs";
+import { Barq, siteOf } from "../src/session.mjs";
 import { formatPage } from "../src/page-model.mjs";
 import { RecipeBook } from "../src/recipes.mjs";
 import { mkdtempSync, rmSync } from "node:fs";
@@ -197,6 +197,13 @@ test("with several saved logins and none named, autofill lists them instead of g
   await assert.rejects(b.act({ tool: "type", target: u, value: "autofill" }), e => e.code === "AUTOFILL_WHICH" && e.accounts.join() === "Uni (alice),Uni (bob)");
   assert.equal(await b.page.inputValue("#u"), "");
   await assert.rejects(b.act({ tool: "type", target: u, value: "autofill:carol" }), /no single saved login matches "carol"/);
+});
+
+test("sites follow the public suffix list: tenants of one host are different sites", () => {
+  assert.equal(siteOf("mail.google.com"), siteOf("accounts.google.com"));
+  assert.equal(siteOf("portal.example.edu.ps"), "example.edu.ps");
+  assert.notEqual(siteOf("alice.github.io"), siteOf("evil.github.io"));
+  assert.equal(siteOf("localhost"), "localhost");
 });
 
 test("a menu listing another site's logins is never picked from", async t => {
