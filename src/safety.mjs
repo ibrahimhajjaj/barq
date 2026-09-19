@@ -19,9 +19,11 @@ const COMMIT = [
 // Controls that look like commits but aren't: search boxes, filters, "send me a code".
 const BENIGN = /\b(search|filter|sort|preview|draft|save draft|send (me )?(a |the )?(code|link|otp)|resend|add to (cart|bag|basket|list|wishlist))\b/i;
 
+// Only the control's own wording counts. What was typed into a field is the user's content:
+// Enter in a todo box holding "buy milk" is not a purchase.
 export function commitsSomething(el) {
   if (!el) return null;
-  const words = [el.label, el.text, el.placeholder, el.name, el.value].filter(Boolean).join(" ").slice(0, 200);
+  const words = [el.label, el.text, el.placeholder, el.name].filter(Boolean).join(" ").slice(0, 200);
   if (!words.trim() || BENIGN.test(words)) return null;
   const hit = COMMIT.map(re => words.match(re)).find(Boolean);
   return hit ? hit[0].trim() : null;

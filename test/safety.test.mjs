@@ -9,6 +9,7 @@ test("controls that pay, send, publish or delete are caught", () => {
     assert.ok(commitsSomething(el(t)), t);
   }
   assert.ok(commitsSomething({ tag: "input:text", placeholder: "Send a message" }), "Enter in a chat box sends");
+  assert.equal(commitsSomething({ tag: "input:text", placeholder: "What needs to be done?", value: "buy milk" }), null, "typed content is not the control's wording");
 });
 
 test("everyday controls pass", () => {
