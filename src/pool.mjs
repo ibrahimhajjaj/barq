@@ -23,6 +23,7 @@ export class SessionPool {
     this.open = open; this.highlight = highlight; this.idleMs = idleMs; this.recipes = recipes;
     this.sessions = new Map();
     this.handle = null;
+    this.holds = 0;          // work outside the sessions (a scan) that still needs the browser
   }
 
   // One browser for all sessions. Callers that find it dead at the same moment share one reopen.
@@ -151,11 +152,18 @@ export class SessionPool {
     await h?.dispose();
   }
 
+  // Keep the browser while some work outside the sessions runs; returns the function that lets go.
+  hold() {
+    this.holds++;
+    let held = true;
+    return () => { if (held) { held = false; this.holds--; this.touch(); } };
+  }
+
   touch() {
     if (!this.idleMs) return;
     clearTimeout(this.idleTimer);
     this.idleTimer = setTimeout(() => {
-      if ([...this.sessions.values()].some(s => s.busy)) return this.touch();
+      if (this.holds || [...this.sessions.values()].some(s => s.busy)) return this.touch();
       this.release().catch(() => {});
     }, this.idleMs);
     this.idleTimer.unref?.();

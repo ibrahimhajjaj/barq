@@ -16,7 +16,10 @@ import { z } from "zod";
 import { SessionPool } from "../src/pool.mjs";
 import { browserConfig, openBrowser } from "../src/browsers.mjs";
 import { RecipeBook } from "../src/recipes.mjs";
-import { TraceLog } from "../src/trace.mjs";
+import { TraceLog, traceDir } from "../src/trace.mjs";
+import { scan } from "../src/scan.mjs";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
 
 const config = browserConfig();
 // Attached to the user's own browser, let go of it after a while without calls: while connected,
@@ -188,6 +191,63 @@ server.registerTool("browser_screenshot", {   // the page as a picture
   const buf = await b.screenshot({ fullPage: !!full_page });
   return { content: [{ type: "image", mimeType: "image/png", data: buf.toString("base64") }] };
 }));
+
+// Scans run in the background: a thousand pages take far longer than a tool call may last, and
+// the agent only needs the file and a few lines back, never the pages themselves.
+const scans = new Map();
+let scanCount = 0;
+const clip = v => { const t = JSON.stringify(v) ?? ""; return t.length > 300 ? `${t.slice(0, 300)}…` : v; };
+
+server.registerTool("browser_scan", {
+  title: "Scan many pages",
+  description: [
+    "Read many pages with no decision model involved: each URL is opened in one of a few background tabs, read, and written as one JSON line to a file. Costs no model tokens per page. Returns at once with a scan id: follow it with browser_scan_status.",
+    "Use it for URLs you already know (dated listings, search result pages, product pages), not for pages that need clicking through.",
+    "Extract with `js` (an expression evaluated in the page, e.g. [...document.querySelectorAll('li')].map(l => l.innerText)) or `selector` (the text of each match); without either, the page's visible text.",
+    "`click_until_gone` clicks a 'load more' button until it disappears. Everything stops if a site answers with a captcha or 'unusual traffic' page: tell the user, never try to get past it.",
+    "Calling again with the same `out` resumes, skipping pages already done. Keep `tabs` at 3 or fewer for one site.",
+  ].join("\n"),
+  inputSchema: {
+    urls: z.array(z.union([z.string(), z.object({ url: z.string(), key: z.string().optional() }).passthrough()])).min(1).max(20_000).describe("URLs, or { url, key?, ...fields kept with the result }"),
+    js: z.string().optional(), selector: z.string().optional(),
+    click_until_gone: z.string().optional().describe("The name of a 'load more' button, e.g. View more flights"),
+    wait_for: z.string().optional().describe("A CSS selector to wait for before reading"),
+    tabs: z.number().int().min(1).max(6).optional().describe("Default 3"),
+    out: z.string().optional().describe("The JSONL file; by default a new one next to barq's traces"),
+  },
+}, async ({ urls, js, selector, click_until_gone, wait_for, tabs, out }) => {
+  try {
+    const id = `scan-${++scanCount}`;
+    const file = out ?? join(traceDir() ?? tmpdir(), "scans", `${new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-")}-${id}.jsonl`);
+    const host = await pool.browser();
+    const ac = new AbortController(), release = pool.hold();
+    const s = { id, status: "running", file, sample: [], errors: [], summary: null, ac };
+    s.run = scan(host, urls, {
+      tabs: tabs ?? 3, checkpoint: file, js, selector, clickUntilGone: click_until_gone, waitFor: wait_for, signal: ac.signal,
+      onRecord: (r, sum) => {
+        s.summary = sum;
+        if (r.error) s.errors = [...s.errors, { key: r.key, error: r.error }].slice(-3);
+        else if (s.sample.length < 3) s.sample.push({ key: r.key, result: clip(r.result) });
+      },
+    }).then(sum => { s.summary = sum; s.status = sum.blocked ? "blocked" : ac.signal.aborted ? "stopped" : "finished"; },
+      e => { s.status = "failed"; s.failure = String(e.message).split("\n")[0]; })
+      .finally(release);
+    scans.set(id, s);
+    return text({ scan: id, file, urls: urls.length, info: "running in the background; follow with browser_scan_status" });
+  } catch (e) { return text({ error: String(e.message).split("\n")[0] }); }
+});
+
+server.registerTool("browser_scan_status", {
+  title: "Scan progress",
+  description: "Progress of a scan started with browser_scan: counts, the file, the first results and the latest errors. stop=true stops it after the pages in hand; the file keeps what's done, and browser_scan with the same out resumes.",
+  inputSchema: { scan: z.string(), stop: z.boolean().optional() },
+}, async ({ scan: id, stop }) => {
+  const s = scans.get(id);
+  if (!s) return text({ error: `no scan ${id}; this server has ${[...scans.keys()].join(", ") || "none"}` });
+  if (stop && s.status === "running") s.ac.abort();
+  const { ac, run, ...shown } = s;
+  return text({ ...shown, ...(s.status === "blocked" ? { info: "a site answered with a captcha or 'unusual traffic' page: tell the user; don't retry until they have looked" } : {}) });
+});
 
 server.registerTool("browser_sessions", {
   title: "List sessions",
