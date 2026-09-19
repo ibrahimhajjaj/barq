@@ -50,9 +50,10 @@ test("findEndpoint reads DevToolsActivePort and ignores a stale one", async () =
 
 // A running browser with remote debugging on, as the user would have it.
 async function startBrowser({ extension = false, args: extra = [] } = {}) {
+  const ext = typeof extension === "string" ? extension : EXTENSION;
   const dir = tmp();
   const args = ["--headless=new", `--user-data-dir=${dir}`, "--remote-debugging-port=0", "--no-first-run", "--no-default-browser-check", ...extra];
-  if (extension) args.push(`--load-extension=${EXTENSION}`, `--disable-extensions-except=${EXTENSION}`);
+  if (extension) args.push(`--load-extension=${ext}`, `--disable-extensions-except=${ext}`);
   const proc = spawn(chromium.executablePath(), [...args, "data:text/html,<title>user tab</title>the user's own tab"], { stdio: "ignore" });
   for (let i = 0; i < 100 && !existsSync(join(dir, "DevToolsActivePort")); i++) await sleep(100);
   await sleep(300);
@@ -118,6 +119,28 @@ test("attached: tabs go in a group, a popup joins it and the user keeps their ta
     await jb.close();
     await host.dispose();
     assert.ok(chrome.alive(), "disposing disconnects without closing the user's browser");
+  } finally { await chrome.stop(); }
+});
+
+test("front() puts an agent tab in front for a moment and gives the user their tab back", async () => {
+  const chrome = await startBrowser({ extension: true });
+  try {
+    const host = await AttachedBrowser.connect(chrome.dir);
+    const page = await host.newTab({ session: "main" });
+    await page.goto(`${base}/agent`);
+    const sw = await host.helper();
+    const state = () => sw.evaluate(() => Promise.all([chrome.tabs.query({}), chrome.tabGroups.query({})]).then(([ts, gs]) => ({
+      front: ts.find(t => t.active)?.url, collapsed: gs[0]?.collapsed,
+    })));
+    await until(async () => (await state()).collapsed);
+    const back = await host.front(page);
+    assert.ok(back, "the helper can do it");
+    assert.equal(new URL((await state()).front).pathname, "/agent", "the agent's tab is in front");
+    await back();
+    const after = await until(async () => { const s = await state(); return s.front.startsWith("data:") && s.collapsed && s; }) ?? await state();
+    assert.ok(after.front.startsWith("data:"), "the user's tab is back in front");
+    assert.equal(after.collapsed, true, "and the group folded up again");
+    await host.dispose();
   } finally { await chrome.stop(); }
 });
 

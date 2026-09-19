@@ -108,7 +108,7 @@ export class SessionPool {
     const replacing = s.hadTab;
     await this.discard(s);
     const page = await host.newTab({ session: s.name });
-    s.jb = await JevBrowser.forPage(page, { highlight: this.highlight });
+    s.jb = await JevBrowser.forPage(page, { highlight: this.highlight, front: host.front ? p => host.front(p) : null });
     s.host = host; s.hadTab = true;
     if (replacing && s.lastUrl) await s.jb.open(s.lastUrl).catch(() => {});
     return replacing;

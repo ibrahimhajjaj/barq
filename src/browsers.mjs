@@ -212,7 +212,8 @@ export class AttachedBrowser {
     if (sw) {
       try {
         const title = session === "main" ? this.group.title : `${this.group.title} · ${session}`;
-        await sw.evaluate(args => self.jevGroup(args), { marker: this.markers.get(page), session, ...this.group, title });
+        const { tabId } = await sw.evaluate(args => self.jevGroup(args), { marker: this.markers.get(page), session, ...this.group, title });
+        (this.tabIds ??= new WeakMap()).set(page, tabId);
         return page;
       } catch (e) {
         // no tab-group API (some Chromium browsers), a window that can't hold groups, ...
@@ -229,6 +230,18 @@ export class AttachedBrowser {
     // No helper: a tab in the user's window could have a popup take over their screen, so use a window instead.
     this.helperMissedAt = Date.now();
     return this.newTab({ session });
+  }
+
+  // Make one of the agent's grouped tabs the tab in front of its window for a moment, without
+  // raising the window. Returns the function that gives the user their tab back, or null when that
+  // can't be done (no helper, or a tab in a window of its own).
+  async front(page) {
+    const sw = await this.helper(2000);
+    if (!sw) return null;
+    const tabId = this.tabIds?.get(page) ?? await sw.evaluate(url => self.jevFindTab(url), page.url()).catch(() => null);
+    if (tabId == null) return null;
+    await sw.evaluate(id => self.jevFront(id), tabId);
+    return () => sw.evaluate(id => self.jevBack(id), tabId).catch(() => {});
   }
 
   // Tries each set of Target.createTarget options in turn (headless builds refuse some of them).

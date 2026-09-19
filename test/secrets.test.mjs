@@ -94,7 +94,8 @@ const MENU = `<body><script>
     const li = ul.appendChild(document.createElement("li")), row = li.appendChild(document.createElement("div"));
     const fill = row.appendChild(document.createElement("button"));
     fill.className = "fill-cipher-button"; fill.setAttribute("aria-label", "Fill credentials for " + l.name); fill.setAttribute("aria-description", "username: " + l.user);
-    fill.innerHTML = '<span class="cipher-details"><span class="cipher-name"></span><span class="cipher-subtitle"></span></span>';
+    fill.innerHTML = '<span class="cipher-icon"></span><span class="cipher-details"><span class="cipher-name"></span><span class="cipher-subtitle"></span></span>';
+    if (l.site) fill.querySelector(".cipher-icon").style.backgroundImage = "url(https://icons.example/" + l.site + "/icon.png)";
     fill.querySelector(".cipher-name").textContent = l.name; fill.querySelector(".cipher-subtitle").textContent = l.user;
     fill.style.cssText = "display:block;width:200px;height:40px";
     fill.onclick = () => parent.postMessage(l, "*");
@@ -176,6 +177,26 @@ test("with several saved logins and none named, autofill lists them instead of g
   await assert.rejects(b.act({ tool: "type", target: u, value: "autofill" }), e => e.code === "AUTOFILL_WHICH" && e.accounts.join() === "Uni (alice),Uni (bob)");
   assert.equal(await b.page.inputValue("#u"), "");
   await assert.rejects(b.act({ tool: "type", target: u, value: "autofill:carol" }), /no single saved login matches "carol"/);
+});
+
+test("a menu listing another site's logins is never picked from", async t => {
+  const { b, u } = await menuPage(t, [{ name: "Mail", user: "me@example.com", site: "mail.example.com" }]);
+  await assert.rejects(b.act({ tool: "type", target: u, value: "autofill" }), e => e.code === "AUTOFILL_BACKGROUND" && /mail\.example\.com/.test(e.message));
+  assert.equal(await b.page.inputValue("#u"), "");
+});
+
+test("a background tab is brought forward for the pick and the user's tab given back", async t => {
+  const { b, u } = await menuPage(t, [{ name: "Uni", user: "alice", site: "localhost" }]);
+  const shown = v => b.page.evaluate(v => Object.defineProperty(document, "visibilityState", { get: () => v, configurable: true }), v);
+  await shown("hidden");
+  const calls = [];
+  b.front = async () => { calls.push("front"); await shown("visible"); return async () => { calls.push("back"); await shown("hidden"); }; };
+  await b.act({ tool: "type", target: u, value: "autofill" });
+  assert.equal(await b.page.inputValue("#u"), "alice");
+  assert.deepEqual(calls, ["front", "back"]);
+  // and without a way to bring it forward, a background tab's menu isn't trusted
+  b.front = null; await b.page.fill("#u", ""); await b.page.fill("#p", "");
+  await assert.rejects(b.act({ tool: "type", target: u, value: "autofill" }), e => e.code === "AUTOFILL_BACKGROUND");
 });
 
 test("a single saved login is picked without naming it", async t => {

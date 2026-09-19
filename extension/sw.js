@@ -79,6 +79,28 @@ self.jevGroup = async ({ marker, session = "main", title = "Agent", color = "pur
   return result;
 };
 
+// A password manager's in-page menu lists the logins of the tab in front of its window, so for a
+// login the agent's tab has to be that tab for a moment. Switching tabs doesn't raise the window or
+// the browser. jevBack gives the user their tab back and folds the group up again if it was.
+self.jevFront = async tabId => {
+  const tab = await chrome.tabs.get(tabId);
+  agentActivatedAt[tab.windowId] = Date.now();
+  await chrome.tabs.update(tabId, { active: true });
+};
+self.jevBack = async tabId => {
+  const tab = await chrome.tabs.get(tabId).catch(() => null);
+  if (!tab) return;
+  agentActivatedAt[tab.windowId] = Date.now();
+  await restoreUserTab(tab.windowId);
+  const { groups } = await load();
+  if (groups[tab.groupId]?.collapsed) await chrome.tabGroups.update(tab.groupId, { collapsed: true }).catch(() => {});
+};
+// The agent's tab showing `url`, for tabs a page opened (their ids aren't known on the other side).
+self.jevFindTab = async url => {
+  const { groups } = await load();
+  return (await chrome.tabs.query({})).find(t => groups[t.groupId] && t.url === url)?.id ?? null;
+};
+
 // Listening for new tabs is also what wakes this worker when the agent opens one.
 chrome.tabs.onCreated.addListener(() => {});
 
