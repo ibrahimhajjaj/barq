@@ -101,7 +101,7 @@ const MENU = `<body><script>
     row.appendChild(document.createElement("button")).className = "view-cipher-button";
   } }, 200);
 </script>`;
-const LOGIN = logins => `<form><input id=u name=username><input id=p type=password name=password></form><script>
+const LOGIN = logins => `<form><input id=u name=username><input id=p type=password name=password><button type=button id=go onclick="document.title = 'as ' + u.value">Log in</button></form><script>
   p.addEventListener("click", () => {
     if (document.querySelector("iframe")) return;
     const f = document.createElement("iframe");
@@ -141,6 +141,34 @@ test("a named account replaces a login the browser filled in on load", async t =
   await b.act({ tool: "type", target: u, value: "autofill:bob" });
   assert.equal(await b.page.inputValue("#u"), "bob");
   assert.equal(await b.page.inputValue("#p"), "pw-bob");
+});
+
+// Stands in for Jev on a form the browser already filled: it goes straight for the button.
+function submitter(b) {
+  b.call = async (state, questions) => {   // stands in for Jev
+    const clicked = (state.task?.history ?? []).some(h => h.action === "click");
+    const go = b.lastPage.elements.find(e => e.text === "Log in").i, answers = {};
+    for (const name of Object.keys(questions)) { const q = questions[name];
+      if (q.type === "noul") answers[name] = { noul: /^(done|done_change|complete)$/.test(name) ? (clicked ? 0.95 : 0.01) : 0 };
+      else if (name === "tool") answers[name] = { choice: clicked ? "none" : "click", probabilities: { click: clicked ? 0 : 1, none: clicked ? 1 : 0 } };
+      else if (name === "target") answers[name] = { choice: String(go), probabilities: { [go]: 1 } };
+      else answers[name] = { choice: Object.keys(q.criteria)[0], probabilities: { [Object.keys(q.criteria)[0]]: 1 } };
+    }
+    return { answers };
+  };
+}
+
+test("a named account is picked before a pre-filled form is submitted", async t => {
+  const { b } = await menuPage(t, TWO);
+  await b.page.fill("#u", "alice"); await b.page.fill("#p", "pw-alice");
+  submitter(b);
+  const r = await b.do("Log in", { values: { username: "autofill:bob", password: "autofill" } });
+  assert.equal(r.status, "done", r.info);
+  assert.equal(await b.page.title(), "as bob");
+  assert.equal(r.actions[0].action, "type");
+  const none = await b.do("Log in", { values: { username: "autofill:carol", password: "autofill" } });
+  assert.equal(none.status, "needs_login");
+  assert.deepEqual(none.accounts, ["Uni (alice)", "Uni (bob)"]);
 });
 
 test("with several saved logins and none named, autofill lists them instead of guessing", async t => {
