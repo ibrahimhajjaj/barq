@@ -285,11 +285,13 @@ export class LaunchedBrowser {
   }
 }
 
-// JEV_BROWSER_ATTACH=chrome|edge|brave|...|auto|<dir>|<url> drives a running browser
+// JEV_BROWSER_ATTACH=chrome|edge|brave|...|auto|<dir>|<url> drives a running browser ("launch" or unset: don't)
 // (JEV_BROWSER_PLACEMENT=auto|group|window|tab, JEV_BROWSER_GROUP_TITLE, JEV_BROWSER_GROUP_COLOR);
 // otherwise a browser is launched (JEV_BROWSER_CHANNEL=chrome|msedge, JEV_BROWSER_PROFILE, JEV_BROWSER_HEADED=1).
 export function browserConfig(env = process.env) {
-  if (env.JEV_BROWSER_ATTACH) {
+  // an unset plugin setting can arrive as its literal "${...}" placeholder
+  env = Object.fromEntries(Object.entries(env).filter(([, v]) => typeof v === "string" && !v.startsWith("${")));
+  if (env.JEV_BROWSER_ATTACH && env.JEV_BROWSER_ATTACH !== "launch") {
     const placement = ["group", "window", "tab"].includes(env.JEV_BROWSER_PLACEMENT) ? env.JEV_BROWSER_PLACEMENT : "auto";
     const group = {};
     if (env.JEV_BROWSER_GROUP_TITLE) group.title = env.JEV_BROWSER_GROUP_TITLE;

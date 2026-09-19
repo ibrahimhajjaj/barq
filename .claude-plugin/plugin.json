@@ -1,0 +1,60 @@
+{
+  "name": "jev-browser",
+  "version": "0.1.1",
+  "description": "A fast browser for coding agents: the agent says what outcome it wants, Jev (TypeSafe's decision model) picks each click in about 300 ms, Playwright acts. Works in a browser it launches or in your own running Chrome or Edge.",
+  "author": {
+    "name": "Ibrahim Hajjaj",
+    "url": "https://github.com/ibrahimhajjaj"
+  },
+  "license": "MIT",
+  "userConfig": {
+    "typesafe_api_key": {
+      "type": "string",
+      "title": "TypeSafe API key",
+      "sensitive": true,
+      "description": "Your key from console.typesafe.ai. Leave empty to use the macOS keychain item \"typesafe-api-key\" or TYPESAFE_API_KEY.",
+      "default": ""
+    },
+    "browser": {
+      "type": "string",
+      "title": "Work in your own browser",
+      "description": "launch: start a separate Chromium. Or name a running browser to work inside it, with your logins: chrome, edge, brave, chromium, vivaldi, arc, or auto (the first one found). It needs remote debugging allowed once (chrome://inspect/#remote-debugging).",
+      "options": [
+        "launch",
+        "chrome",
+        "edge",
+        "brave",
+        "chromium",
+        "vivaldi",
+        "arc",
+        "auto"
+      ],
+      "default": "launch"
+    },
+    "placement": {
+      "type": "string",
+      "title": "Where the agent's tabs go in your browser",
+      "description": "auto: a tab group if the helper extension is loaded, otherwise a separate window. group, window or tab to force one.",
+      "options": [
+        "auto",
+        "group",
+        "window",
+        "tab"
+      ],
+      "default": "auto"
+    }
+  },
+  "mcpServers": {
+    "jev-browser": {
+      "command": "node",
+      "args": [
+        "${CLAUDE_PLUGIN_ROOT}/bin/jev-browser-mcp.mjs"
+      ],
+      "env": {
+        "TYPESAFE_API_KEY": "${user_config.typesafe_api_key}",
+        "JEV_BROWSER_ATTACH": "${user_config.browser}",
+        "JEV_BROWSER_PLACEMENT": "${user_config.placement}"
+      }
+    }
+  }
+}
