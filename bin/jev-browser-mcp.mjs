@@ -8,12 +8,13 @@
 //      JEV_BROWSER_PLACEMENT=auto|group|window|tab for where the agent's tabs go in that browser,
 //      otherwise a launched Chromium: JEV_BROWSER_HEADED=1, JEV_BROWSER_CHANNEL=chrome|msedge,
 //      JEV_BROWSER_PROFILE=/dir (persistent profile, keeps logins),
-//      JEV_BROWSER_LOG=1 (rounds to stderr)
+//      JEV_BROWSER_LOG=1 (rounds to stderr), JEV_BROWSER_TRACES=<dir>|0 (per-step records on disk)
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
 import { SessionPool } from "../src/pool.mjs";
 import { browserConfig } from "../src/browsers.mjs";
+import { TraceLog } from "../src/trace.mjs";
 
 const config = browserConfig();
 // Attached to the user's own browser, let go of it after a while without calls: while connected,
@@ -24,6 +25,8 @@ const pool = new SessionPool({ highlight: config.kind === "launch" && config.hea
 const text = value => ({ content: [{ type: "text", text: typeof value === "string" ? value : JSON.stringify(value, null, 1) }] });
 const fail = e => ({ isError: true, content: [{ type: "text", text: String(e?.message ?? e).split("\n", 1)[0] }] });
 const stderrLog = process.env.JEV_BROWSER_LOG === "1" ? line => process.stderr.write(`${line}\n`) : () => {};
+// one file per browser_do step, with every round's probabilities (JEV_BROWSER_TRACES=0 turns it off)
+const traces = new TraceLog();
 
 const session = z.string().regex(/^[\w.-]{1,40}$/).optional().describe("Browser session: its own tab. Calls on different sessions run in parallel, calls on one session run in order. Default \"main\"");
 
@@ -78,12 +81,14 @@ server.registerTool("browser_do", {   // one outcome, Jev choosing each action
     explain: z.boolean().optional().describe("Put Jev's probabilities for every round in the result"),
     session,
   },
-}, tool(async (b, { goal, values, max_actions, timeout_s, allow_irreversible, explain }) => {
+}, tool(async (b, { goal, values, max_actions, timeout_s, allow_irreversible, explain, session: name }) => {
   const r = await b.do(goal, { values: values ?? {}, maxActions: max_actions ?? 10, timeoutMs: (timeout_s ?? 90) * 1000, allowIrreversible: !!allow_irreversible, log: stderrLog });
+  const trace = traces.write("do", { ...r, values: Object.keys(values ?? {}), model: b.stats.model }, { session: name ?? "main", values });
   const actions = r.actions.map(h => h.event ? `(event) ${h.event}` : [h.action, h.key, h.element, h.value && `<- values.${h.value}`, h.option && `<- "${h.option}"`, h.destination && `-> ${h.destination}`, h.error && `ERROR: ${h.error}`].filter(Boolean).join(" "));
   const { status, url, title, done_score, jev_calls, ms } = r; const out = { status, url, title, actions, done_score, jev_calls, ms };
   for (const key of ["info", "pending", "page_text", "candidates"]) if (r[key]) out[key] = r[key];
   if (explain) out.rounds = r.rounds.map(({ candidates, ...round }) => round);
+  if (trace) out.trace = trace;
   return out;
 }, ({ timeout_s }) => ((timeout_s ?? 90) + 30) * 1000));
 
