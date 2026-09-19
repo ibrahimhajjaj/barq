@@ -97,7 +97,8 @@ chrome.tabGroups.onUpdated.addListener(group => exclusive(async () => {
 }).catch(() => {}));
 
 // A link with target=_blank or window.open() in an agent tab. The new tab's openerTabId can name
-// the user's active tab instead of the agent's, so the navigation's source tab decides.
+// the user's active tab instead of the agent's, so the navigation's source tab decides. A popup
+// window of its own is left alone here: the automation side minimizes it, extension or not.
 // Nothing here focuses a window, which would pull the browser in front of whatever app the user is in.
 chrome.webNavigation.onCreatedNavigationTarget.addListener(async ({ sourceTabId, tabId }) => {
   const source = await chrome.tabs.get(sourceTabId).catch(() => null);
@@ -111,9 +112,6 @@ chrome.webNavigation.onCreatedNavigationTarget.addListener(async ({ sourceTabId,
     // opened in another of the user's windows: bring it next to its opener
     await chrome.tabs.move(tabId, { windowId: source.windowId, index: -1 }).catch(() => {});
   } else if (win.id !== source.windowId) {
-    // a popup window (or a new window of its own): it can't hold a group, so tuck it away
-    await chrome.windows.update(win.id, { state: "minimized" }).catch(() => {});
-    await restoreUserTab(source.windowId);
     return;
   }
   agentActivatedAt[source.windowId] = Date.now();

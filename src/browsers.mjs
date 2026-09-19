@@ -141,8 +141,28 @@ export class AttachedBrowser {
     // Tabs opened by the agent's tabs are the agent's too: they get the same care and are closed with them.
     this.context.on("page", async p => {
       const opener = await p.opener().catch(() => null);
-      if (opener && this.owned.has(opener)) this.own(p).catch(() => {});
+      if (!opener || !this.owned.has(opener)) return;
+      await this.own(p).catch(() => {});
+      await this.tuckAway(p, opener).catch(() => {});
     });
+  }
+
+  // A popup window one of the agent's tabs opened (window.open with a size, a sign-in popup):
+  // minimize it so it doesn't cover what the user is doing; the agent keeps working in it.
+  // Only a window holding nothing but that tab, never one of the user's windows.
+  async tuckAway(popup, opener) {
+    const cdp = await (this.cdp ??= this.browser.newBrowserCDPSession());
+    const targetOf = async page => {
+      const s = await this.context.newCDPSession(page);
+      try { return (await s.send("Target.getTargetInfo")).targetInfo.targetId; } finally { await s.detach().catch(() => {}); }
+    };
+    const windowOf = async targetId => (await cdp.send("Browser.getWindowForTarget", { targetId })).windowId;
+    const [win, openerWin] = await Promise.all([targetOf(popup).then(windowOf), targetOf(opener).then(windowOf)]);
+    if (win === openerWin) return;
+    const { targetInfos } = await cdp.send("Target.getTargets", { filter: [{ type: "tab" }, { exclude: true }] });
+    const windows = await Promise.all(targetInfos.map(t => windowOf(t.targetId).catch(() => null)));
+    if (windows.filter(w => w === win).length !== 1) return;
+    await cdp.send("Browser.setWindowBounds", { windowId: win, bounds: { windowState: "minimized" } });
   }
 
   get name() { return this.endpoint.name; }

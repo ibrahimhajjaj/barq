@@ -136,6 +136,25 @@ test("attached without the helper: auto falls back to a separate window", async 
   } finally { await chrome.stop(); }
 });
 
+test("a popup window an agent tab opens is minimized; the user's window never is", async () => {
+  const chrome = await startBrowser();
+  try {
+    const host = await AttachedBrowser.connect(chrome.dir, { placement: "tab" });
+    const page = await host.newTab();
+    await page.goto(`${base}/agent`);
+    const [popup] = await Promise.all([page.waitForEvent("popup"), page.evaluate(url => window.open(url, "signin", "width=420,height=360"), `${base}/popup`)]);
+    const state = async p => {
+      const b = await host.browser.newBrowserCDPSession();
+      try { return (await b.send("Browser.getWindowBounds", { windowId: await windowOf(host, p) })).bounds.windowState; } finally { await b.detach(); }
+    };
+    assert.equal(await until(async () => (await state(popup)) === "minimized" && "minimized"), "minimized");
+    const userTab = host.context.pages().find(p => p.url().startsWith("data:"));
+    assert.notEqual(await state(userTab), "minimized");
+    assert.equal(await state(page), "normal", "a background tab in the user's window leaves that window alone");
+    await host.dispose();
+  } finally { await chrome.stop(); }
+});
+
 test("attaching leaves the user's tabs as they were: colour scheme, focus, and their own dialogs", async () => {
   const chrome = await startBrowser({ args: ["--force-dark-mode"] });
   try {
