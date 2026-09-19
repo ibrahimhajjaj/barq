@@ -6,6 +6,7 @@ import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join, isAbsolute } from "node:path";
 import net from "node:net";
+import { relayEndpoint } from "./relay.mjs";
 
 const sleep = ms => new Promise(done => setTimeout(done, ms));
 const MAC = "Library/Application Support";
@@ -113,15 +114,28 @@ export class AttachedBrowser {
 
   static async connect(spec = "auto", { placement = "auto", group = {}, size = { width: 1280, height: 800 }, allowTimeoutMs = 120_000 } = {}) {
     const endpoint = await findEndpoint(spec);
+    const slow = () => new Error(`Connecting to ${endpoint.name} took longer than ${Math.round(allowTimeoutMs / 1000)}s. If it shows an "Allow remote debugging" prompt, click Allow; otherwise one of its tabs may be hung. Then retry.`);
+    // On recent browsers each new connection waits for the user to click "Allow". One approved
+    // connection per browser run is shared through a relay process, so a new server (another agent
+    // session, a restart) doesn't ask again. Straight to the browser when the relay is off or
+    // can't run here.
+    let url = endpoint.ws;
+    if (process.env.JEV_BROWSER_RELAY !== "0") {
+      try { url = await relayEndpoint(endpoint.ws, { timeoutMs: allowTimeoutMs }); }
+      catch (e) {
+        if (e.code === "RELAY_TIMEOUT") throw slow();
+        if (e.code === "RELAY_REFUSED") throw new Error(`${endpoint.name} didn't allow the connection (${e.message}). Click "Allow" when it asks, then retry.`);
+      }
+    }
     let browser;
     try {
       // noDefaults: without it, attaching applies automation defaults (focus emulation, forced
       // light colour scheme and motion settings, a temporary downloads folder) to every tab of the
-      // user's profile. On recent browsers each new connection also waits for the user to click
-      // "Allow", and a short timeout would drop that prompt and raise a fresh one next time.
-      browser = await chromium.connectOverCDP(endpoint.ws, { timeout: allowTimeoutMs, noDefaults: true });
+      // user's profile. A short timeout would drop a pending "Allow" prompt and raise a fresh one
+      // next time.
+      browser = await chromium.connectOverCDP(url, { timeout: allowTimeoutMs, noDefaults: true });
     } catch (e) {
-      if (/timeout/i.test(String(e.message))) throw new Error(`Connecting to ${endpoint.name} took longer than ${Math.round(allowTimeoutMs / 1000)}s. If it shows an "Allow remote debugging" prompt, click Allow; otherwise one of its tabs may be hung. Then retry.`);
+      if (/timeout/i.test(String(e.message))) throw slow();
       throw e;
     }
     return new AttachedBrowser(browser, endpoint, { placement, group, size });
