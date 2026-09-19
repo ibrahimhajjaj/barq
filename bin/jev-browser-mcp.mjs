@@ -108,6 +108,23 @@ server.registerTool("browser_snapshot", {   // the page as numbered elements
   inputSchema: { session },
 }, tool(b => b.snapshotText()));
 
+server.registerTool("browser_read", {   // what the page says
+  title: "Read page",
+  description: [
+    "Read the current page's text: the whole page, not just what is on screen. Use it to answer questions from a page instead of taking snapshots.",
+    "- With `question`: Jev picks the passages that answer it from the whole page (about a second, even on long pages) and only those come back, each with its heading and a probability. `answered` near 0 means the page doesn't seem to contain the answer.",
+    "- Without: the text a page at a time, max_chars per call; pass next_offset back as offset to continue.",
+    "Navigation, sidebars and footers are left out unless all_regions is true.",
+  ].join("\n"),
+  inputSchema: {
+    question: z.string().optional().describe("What you want to know from the page"),
+    offset: z.number().int().min(0).optional(),
+    max_chars: z.number().int().min(500).max(40_000).optional().describe("Default 12000"),
+    all_regions: z.boolean().optional(),
+    session,
+  },
+}, tool((b, { question, offset, max_chars, all_regions }) => b.read({ question, offset: offset ?? 0, maxChars: max_chars ?? 12_000, allRegions: !!all_regions })));
+
 server.registerTool("browser_act", {   // one action on a numbered element
   title: "Act on element",
   description: "One action on an element number taken from the latest browser_snapshot or from browser_do's candidates, with no decision model involved. The number is matched to the page as it is now; if the element has gone, take a new snapshot. A confirm or prompt the action raises is turned down unless accept_dialog is true.",
