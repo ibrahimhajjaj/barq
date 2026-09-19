@@ -157,6 +157,33 @@ test("a recipe is tied to its page's query and fragment, and not to tracking par
   assert.equal(await added(), undefined);
 });
 
+test("a step in a frame replays only in a frame at the same address", async t => {
+  const { b } = await session(t, "");
+  let widget = "pay";
+  await b.page.route("https://frames.test/**", route => {
+    const path = new URL(route.request().url()).pathname;
+    route.fulfill({ contentType: "text/html", body: path === "/checkout" ? `<p>Checkout</p><iframe src="/widgets/${widget}" width=300 height=80></iframe>`
+      : `<button onclick="parent.document.body.dataset.clicked = '${path}'">Continue</button>` });
+  });
+  const clicked = () => b.page.evaluate(() => document.body.dataset.clicked);
+  await b.open("https://frames.test/checkout");
+  jev(b, (page, history) => !did(history, "Continue") ? answer({ target: el(page, e => e.text === "Continue") }) : finished(0.95));
+  assert.equal((await b.do("Continue the checkout")).recipe, "recorded");
+  await b.open("https://frames.test/checkout");
+  let n = jev(b, () => finished(0.95));
+  assert.equal((await b.do("Continue the checkout")).recipe, "replayed");
+  assert.equal(n.decide, 1);
+  assert.equal(await clicked(), "/widgets/pay");
+  // the page now embeds another widget with the same button: it isn't clicked for the recorded one
+  widget = "ads";
+  await b.open("https://frames.test/checkout");
+  n = jev(b, () => finished(0.95));
+  const r = await b.do("Continue the checkout");
+  assert.equal(r.recipe, undefined);
+  assert.deepEqual(r.actions, []);
+  assert.equal(await clicked(), undefined);
+});
+
 test("a target that is gone stops the replay, and the loop finishes the step and records it again", async t => {
   const WIZARD = name => `<button onclick="document.body.dataset.next = 1">Next</button><button onclick="document.body.dataset.end = 1">${name}</button>`;
   const { b, book, notes } = await session(t, WIZARD("Finish"));

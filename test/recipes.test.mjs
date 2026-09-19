@@ -37,6 +37,28 @@ test("an element told apart from look-alikes is not taken for the one look-alike
   assert.equal(findElement(describe(els[1], [els[1]]), [els[0]]).i, 0, "one that stood alone is found by its name");
 });
 
+test("a recorded link must still lead where it did, even for the only element of its kind", () => {
+  const next = { i: 0, tag: "a", text: "Continue", href: "/review" };
+  const d = describe(next, [next]);
+  assert.equal(d.alike, undefined);
+  assert.equal(findElement(d, [{ ...next, i: 3, href: "/cancel" }]), null);
+  assert.equal(findElement(d, [{ i: 3, tag: "a", text: "Continue" }]), null, "nor one that lost its link");
+  assert.equal(findElement(d, [{ ...next, i: 3 }]).i, 3);
+});
+
+test("an element in a frame is found only in a frame at the same address", () => {
+  const pay = { i: 0, tag: "button", text: "Continue", frame: 1 };
+  const at = urls => e => urls[e.frame];
+  const d = describe(pay, [pay], {}, at({ 1: "https://pay.test/widget?session=1" }));
+  assert.match(d.frame, /^[0-9a-f]{16}$/);
+  assert.doesNotMatch(JSON.stringify(d), /pay\.test|widget/);
+  // the only look-alike, in another site's frame
+  assert.equal(findElement(d, [{ ...pay, i: 4, frame: 2 }], {}, at({ 2: "https://ads.test/widget" })), null);
+  // the same frame loaded again: another number and query, the same address
+  assert.equal(findElement(d, [{ ...pay, i: 4, frame: 2 }], {}, at({ 2: "https://pay.test/widget?session=2" })).i, 4);
+  assert.equal(findElement(d, [{ ...pay, i: 4, frame: undefined }]), null, "not in the page itself");
+});
+
 test("descriptions hold fingerprints, and value contents are masked by name before they are taken", () => {
   const link = { i: 0, tag: "a", text: "Open cats", near: "Results for cats", href: "/r/cats" };
   const d = describe(link, [link], { q: "cats", n: "1" });

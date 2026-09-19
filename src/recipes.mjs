@@ -73,27 +73,35 @@ export function matches(text, print, values) {
 
 const nameOf = e => (e.label || e.text || e.placeholder || e.name || "").slice(0, 80);
 const sameKind = (a, b) => a.tag === b.tag && nameOf(a) === nameOf(b) && !!a.frame === !!b.frame;
+// A frame's address without its query or fragment, which many embedded widgets change on every load.
+const frameAt = url => {
+  try { const u = new URL(url); return (u.origin !== "null" ? u.origin : u.protocol) + u.pathname.replace(/\/+$/, ""); } catch { return String(url ?? ""); }
+};
 
 // What identifies an element across visits: its kind, and fingerprints of its name, the text
-// around it and its link. Given the page's elements, `alike` notes that look-alikes stood next to
-// it, so its surroundings told it apart.
-export function describe(el, elements = [], values = {}) {
+// around it, its link and the address of the frame it is in (`frameOf` gives an element's frame
+// address). Given the page's elements, `alike` notes that look-alikes stood next to it, so its
+// surroundings told it apart.
+export function describe(el, elements = [], values = {}, frameOf = () => undefined) {
   if (!el) return null;
   const d = { tag: el.tag, name: fingerprint(nameOf(el), values) };
   if (el.near) d.near = fingerprint(el.near, values);
   if (el.href) d.href = fingerprint(el.href, values);
-  if (el.frame) d.frame = true;
+  if (el.frame) d.frame = fingerprint(frameAt(frameOf(el)), values);
   if (elements.some(e => e !== el && sameKind(e, el))) d.alike = true;
   return d;
 }
 
-// The element on this page that matches a description: same kind and name, and among several
-// look-alikes the one with the same surrounding text. Ambiguity means no match. One that had
-// look-alikes must keep its surroundings even when it is the only one left: that one may be
-// another row, the recorded one gone.
-export function findElement(d, elements, values = {}) {
+// The element on this page that matches a description: same kind and name, in a frame at the
+// same address, with the same link when it had one (a lone "Continue" that now goes somewhere
+// else is another control), and among several look-alikes the one with the same surrounding text.
+// Ambiguity means no match. One that had look-alikes must keep its surroundings even when it is
+// the only one left: that one may be another row, the recorded one gone. Surrounding text is only
+// asked of look-alikes: next to a lone control it shifts as the page's content does.
+export function findElement(d, elements, values = {}, frameOf = () => undefined) {
   if (!d) return null;
-  const same = elements.filter(e => e.tag === d.tag && !!e.frame === !!d.frame && matches(nameOf(e), d.name, values));
+  const inFrame = e => d.frame ? !!e.frame && matches(frameAt(frameOf(e)), d.frame, values) : !e.frame;
+  const same = elements.filter(e => e.tag === d.tag && inFrame(e) && matches(nameOf(e), d.name, values) && (!d.href || (!!e.href && matches(e.href, d.href, values))));
   if (same.length === 1 && !d.alike) return same[0];
   const fits = (text, print) => text ? !!print && matches(text, print, values) : !print;
   const byNear = same.filter(e => fits(e.near, d.near) && fits(e.href, d.href));
@@ -101,7 +109,7 @@ export function findElement(d, elements, values = {}) {
 }
 
 // Recipes carry this. Older ones kept page text, or told pages apart without their query and
-// fragment: never used, and dropped.
+// fragment and frames only as "some frame": never used, and dropped.
 const FORMAT = 3;
 
 // Several processes can share the file (one MCP server per agent session), so every change
