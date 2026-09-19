@@ -75,6 +75,28 @@ test("the relay refuses web pages and callers without its token, and never close
   assert.equal(br.proc.exitCode, null, "the browser is still running");
 });
 
+test("tabs a client opened and left open are closed when it goes; the user's stay", async () => {
+  const br = await startBrowser();
+  const relay = await startRelay(br.ws);
+  cleanups.push(() => relay.close());
+  const a = await chromium.connectOverCDP(relay.url, { noDefaults: true });
+  const p = await a.contexts()[0].newPage();
+  await p.goto("data:text/html,<title>left behind</title>");
+  await p.evaluate(() => window.open("data:text/html,<title>its popup</title>"));
+  await new Promise(r => setTimeout(r, 500));
+  await a.close();   // gone without closing its tabs, as a killed server would
+  const b = await chromium.connectOverCDP(relay.url, { noDefaults: true });
+  let titles = [];
+  for (let i = 0; i < 30; i++) {
+    titles = await Promise.all(b.contexts()[0].pages().map(q => q.title().catch(() => "")));
+    if (!titles.includes("left behind") && !titles.includes("its popup")) break;
+    await sleep(100);
+  }
+  assert.ok(!titles.includes("left behind") && !titles.includes("its popup"), `still open: ${titles}`);
+  assert.ok(b.contexts()[0].pages().some(q => q.url() === "about:blank"), "the user's own tab is untouched");
+  await b.close();
+});
+
 test("the relay goes away with the browser", async () => {
   const br = await startBrowser();
   let exited = false;
@@ -100,6 +122,7 @@ test("relayEndpoint starts one relay per browser run and hands every caller the 
   assert.equal(await p.title(), "via relay");
   await p.context().browser().close();
   assert.equal(await relayEndpoint(br.ws, { dir }), u1);
+  assert.match(readFileSync(join(dir, "relay.log"), "utf8"), /allowed; serving/, "it says what it did");
   // the relay leaves with the browser, and its file with it
   br.proc.kill(); await br.exited;
   for (let i = 0; i < 50 && existsSync(file); i++) await sleep(100);

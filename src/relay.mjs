@@ -6,8 +6,9 @@
 // one prompt per browser run. It listens on 127.0.0.1 behind a random token kept in a file only this
 // user can read, refuses connections from web pages, and gives each client its own browser-level
 // session on the shared connection, so clients only ever see the sessions they opened. A client
-// can't close the user's browser through it. It exits when the browser goes away, or after `idle`
-// with no client connected.
+// can't close the user's browser through it, and the tabs a client opened are closed when it goes
+// away without closing them (a server that was killed). It exits when the browser goes away, or
+// after `idle` with no client connected.
 import http from "node:http";
 import crypto from "node:crypto";
 import fs from "node:fs";
@@ -40,7 +41,7 @@ const ANSWER_MS = 10 * 60_000;
 // Serve `upstream` (the browser's ws:// endpoint). Resolves once connected and listening, with
 // { url, close }; rejects when the browser refuses or the user doesn't allow the connection.
 
-export async function startRelay(upstream, { idleMs = IDLE_MS, onExit = () => {} } = {}) {
+export async function startRelay(upstream, { idleMs = IDLE_MS, onExit = () => {}, log = () => {} } = {}) {
   const up = new WebSocket(upstream, { perMessageDeflate: false, maxPayload: MAX_MESSAGE, handshakeTimeout: ANSWER_MS });
   await new Promise((resolve, reject) => {
     up.once("open", resolve);
@@ -62,7 +63,7 @@ export async function startRelay(upstream, { idleMs = IDLE_MS, onExit = () => {}
     if (msg.sessionId === c.root) { msg = { ...msg }; delete msg.sessionId; }
     if (c.ws.readyState === WebSocket.OPEN) c.ws.send(JSON.stringify(msg));
   };
-  const idle = () => { clearTimeout(idleTimer); if (!clients.size) idleTimer = setTimeout(close, idleMs).unref?.() ?? idleTimer; };
+  const idle = () => { clearTimeout(idleTimer); if (!clients.size) idleTimer = setTimeout(() => close(`no client for ${Math.round(idleMs / 60_000)} min`), idleMs); };
 
   up.on("message", data => {
     let msg; try { msg = JSON.parse(data); } catch { return; }
@@ -71,12 +72,19 @@ export async function startRelay(upstream, { idleMs = IDLE_MS, onExit = () => {}
       pending.delete(msg.id);
       if (p.resolve) return msg.error ? p.reject(new Error(msg.error.message)) : p.resolve(msg.result);
       if (msg.result?.sessionId && /^Target\.attachTo/.test(p.method)) owner.set(msg.result.sessionId, p.client);
+      if (msg.result?.targetId && p.method === "Target.createTarget") p.client.tabs.add(msg.result.targetId);
       return deliver(p.client, { ...msg, id: p.id });
     }
     const c = owner.get(msg.sessionId);
     if (!c) return;
     // sessions opened for a client (its tabs, their frames and workers) are that client's
-    if (msg.method === "Target.attachedToTarget") owner.set(msg.params.sessionId, c);
+    if (msg.method === "Target.attachedToTarget") {
+      owner.set(msg.params.sessionId, c);
+      // a tab one of its tabs opened is the client's too
+      const t = msg.params.targetInfo;
+      if (t?.type === "page" && c.tabs.has(t.openerId)) c.tabs.add(t.targetId);
+    }
+    if (msg.method === "Target.targetDestroyed") c.tabs.delete(msg.params.targetId);
     deliver(c, msg);
     if (msg.method === "Target.detachedFromTarget") owner.delete(msg.params.sessionId);
   });
@@ -91,8 +99,9 @@ export async function startRelay(upstream, { idleMs = IDLE_MS, onExit = () => {}
   });
 
   function serve(ws) {
-    const c = { ws, root: null };
+    const c = { ws, root: null, tabs: new Set() };
     clients.add(c); idle();
+    log(`client connected (${clients.size} now)`);
     const ready = call("Target.attachToBrowserTarget").then(r => { c.root = r.sessionId; owner.set(c.root, c); });
     ready.catch(() => ws.close());
     ws.on("message", async data => {
@@ -113,19 +122,23 @@ export async function startRelay(upstream, { idleMs = IDLE_MS, onExit = () => {}
       for (const [id, p] of pending) if (p.client === c) pending.delete(id);
       // the sessions it opened go with its browser-level one
       if (c.root) send({ id: nextId++, method: "Target.detachFromTarget", params: { sessionId: c.root } });
+      // tabs it opened and never closed; closing one that is already gone just fails
+      for (const targetId of c.tabs) send({ id: nextId++, method: "Target.closeTarget", params: { targetId } });
+      log(`client left (${clients.size} now)${c.tabs.size ? `, closing ${c.tabs.size} tab(s) it left open` : ""}`);
       idle();
     });
   }
 
-  function close() {
+  function close(why) {
     if (closed) return; closed = true;
+    log(`stopping: ${why}`);
     clearTimeout(idleTimer);
     for (const c of clients) c.ws.close();
     wss.close(); server.close(); up.close();
-    onExit();
+    onExit(why);
   }
-  up.on("close", close);
-  up.on("error", close);
+  up.on("close", (code, reason) => close(`the browser closed the connection (${code}${reason?.length ? ` ${reason}` : ""})`));
+  up.on("error", e => close(`connection error: ${e.message}`));
 
   await new Promise(r => server.listen(0, "127.0.0.1", r));
   idle();
@@ -158,7 +171,12 @@ export async function relayEndpoint(upstream, { timeoutMs = 120_000, dir = state
         fs.writeFileSync(lock, String(process.pid), { flag: "wx", mode: 0o600 });
         try {
           fs.rmSync(file, { force: true });
-          const child = spawn(process.execPath, [fileURLToPath(import.meta.url), upstream, file], { detached: true, stdio: "ignore" });
+          // its log goes next to the state file, restarted once it passes 1 MB
+          const logFile = path.join(dir, "relay.log");
+          if ((fs.statSync(logFile, { throwIfNoEntry: false })?.size ?? 0) > 1 << 20) fs.rmSync(logFile, { force: true });
+          const out = fs.openSync(logFile, "a", 0o600);
+          const child = spawn(process.execPath, [fileURLToPath(import.meta.url), upstream, file], { detached: true, stdio: ["ignore", out, out] });
+          fs.closeSync(out);
           child.unref(); started++;
           for (let i = 0; i < 50 && !readJson(file); i++) await sleep(100);
         } finally { fs.rmSync(lock, { force: true }); }
@@ -180,10 +198,13 @@ if (process.argv[1] && fileURLToPath(import.meta.url) === path.resolve(process.a
   const [upstream, file] = process.argv.slice(2);
   const write = s => fs.writeFileSync(file, JSON.stringify(s), { mode: 0o600 });
   const forget = () => { if (readJson(file)?.pid === process.pid) fs.rmSync(file, { force: true }); };
+  const log = m => console.error(`${new Date().toISOString()} [${process.pid}] ${m}`);
+  process.on("uncaughtException", e => { log(`crashed: ${e.stack}`); forget(); process.exit(1); });
   // first a placeholder, so other servers wait for this relay instead of starting another
   write({ upstream, pid: process.pid });
-  startRelay(upstream, { onExit: () => { forget(); process.exit(0); } })
-    .then(r => write({ url: r.url, upstream, pid: process.pid }))
-    .catch(e => { write({ error: `the browser didn't allow the connection: ${e.message}`, upstream, pid: process.pid }); setTimeout(() => process.exit(1), 5000); });
-  for (const sig of ["SIGINT", "SIGTERM", "SIGHUP"]) process.on(sig, () => { forget(); process.exit(0); });
+  log(`waiting for the browser to allow the connection (${upstream.replace(/\/devtools\/.*/, "")})`);
+  startRelay(upstream, { log, onExit: () => { forget(); process.exit(0); } })
+    .then(r => { write({ url: r.url, upstream, pid: process.pid }); log("allowed; serving"); })
+    .catch(e => { log(`not allowed: ${e.message}`); write({ error: `the browser didn't allow the connection: ${e.message}`, upstream, pid: process.pid }); setTimeout(() => process.exit(1), 5000); });
+  for (const sig of ["SIGINT", "SIGTERM", "SIGHUP"]) process.on(sig, () => { log(`stopping: ${sig}`); forget(); process.exit(0); });
 }
