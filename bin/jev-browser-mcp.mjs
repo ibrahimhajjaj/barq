@@ -8,12 +8,14 @@
 //      JEV_BROWSER_PLACEMENT=auto|group|window|tab for where the agent's tabs go in that browser,
 //      otherwise a launched Chromium: JEV_BROWSER_HEADED=1, JEV_BROWSER_CHANNEL=chrome|msedge,
 //      JEV_BROWSER_PROFILE=/dir (persistent profile, keeps logins),
-//      JEV_BROWSER_LOG=1 (rounds to stderr), JEV_BROWSER_TRACES=<dir>|0 (per-step records on disk)
+//      JEV_BROWSER_LOG=1 (rounds to stderr), JEV_BROWSER_TRACES=<dir>|0 (per-step records on disk),
+//      JEV_BROWSER_RECIPES=<file>|0 (steps that finished, replayed when repeated; 0 turns it off)
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
 import { SessionPool } from "../src/pool.mjs";
 import { browserConfig, openBrowser } from "../src/browsers.mjs";
+import { RecipeBook } from "../src/recipes.mjs";
 import { TraceLog } from "../src/trace.mjs";
 
 const config = browserConfig();
@@ -23,7 +25,7 @@ const idleMin = Number(process.env.JEV_BROWSER_IDLE_MIN ?? (config.kind === "att
 // A tool call gives up after 60 s. The browser's "Allow" prompt can take longer than that to be
 // answered, so the connection gives up first, with a message that says to click it; the prompt
 // stays up and the next call finds the connection ready.
-const pool = new SessionPool({ open: () => openBrowser({ ...config, allowTimeoutMs: 45_000 }), highlight: config.kind === "launch" && config.headed, idleMs: idleMin * 60_000 });
+const pool = new SessionPool({ open: () => openBrowser({ ...config, allowTimeoutMs: 45_000 }), highlight: config.kind === "launch" && config.headed, idleMs: idleMin * 60_000, recipes: new RecipeBook() });
 
 const text = value => ({ content: [{ type: "text", text: typeof value === "string" ? value : JSON.stringify(value, null, 1) }] });
 const fail = e => ({ isError: true, content: [{ type: "text", text: String(e?.message ?? e).split("\n", 1)[0] }] });
@@ -81,6 +83,7 @@ server.registerTool("browser_do", {   // one outcome, Jev choosing each action
     "- For secrets, pass a reference instead of the secret: \"keychain:<service>[/<account>]\", \"bw:<item>[/password|/username|/totp]\" (Bitwarden CLI), \"env:<NAME>\", or \"autofill\" to let the browser's password manager fill the field (\"autofill:<account>\" picks one of several saved logins by part of its name or username; with several and none named, the step stops with needs_login and lists them in `accounts`). Values whose names look secret (password, pin, otp, token, card...) and all references are never shown to the decision model or returned.",
     "- Give an open-ended goal an end you can count (\"until at least 3 new results are shown\").",
     "Statuses: done | likely_done (Jev is unsure the goal is met: verify with browser_check or browser_snapshot before moving on) | needs_login (sign-in wall and no credentials given: ask the user to log in, or pass credentials in values) | needs_confirmation (next click looks irreversible: re-call with allow_irreversible=true only if the user wants it) | error (page shows an error) | blocked | stuck | ambiguous (see candidates; use browser_act) | max_actions | timeout (ran out of time; see actions).",
+    "A goal that finished before from the same page replays the actions that worked, without the decision model, which then checks the result (`recipe` in the result says so).",
     "After a step that changes something, confirm with browser_check that nothing else changed with it.",
   ].join("\n"),
   inputSchema: {
@@ -90,14 +93,15 @@ server.registerTool("browser_do", {   // one outcome, Jev choosing each action
     timeout_s: z.number().int().min(5).max(600).optional().describe("Time limit for the whole step. Default 90"),
     allow_irreversible: z.boolean().optional().describe("Go ahead with actions that are hard to undo: ordering, paying, sending, deleting"),
     explain: z.boolean().optional().describe("Put Jev's probabilities for every round in the result"),
+    recipe: z.boolean().optional().describe("Replay what finished this goal on this page before, and record what finishes it now. Default true"),
     session,
   },
-}, tool(async (b, { goal, values, max_actions, timeout_s, allow_irreversible, explain, session: name }) => {
-  const r = await b.do(goal, { values: values ?? {}, maxActions: max_actions ?? 10, timeoutMs: (timeout_s ?? 90) * 1000, allowIrreversible: !!allow_irreversible, log: stderrLog });
+}, tool(async (b, { goal, values, max_actions, timeout_s, allow_irreversible, explain, recipe, session: name }) => {
+  const r = await b.do(goal, { values: values ?? {}, maxActions: max_actions ?? 10, timeoutMs: (timeout_s ?? 90) * 1000, allowIrreversible: !!allow_irreversible, log: stderrLog, recipe: recipe !== false });
   const trace = traces.write("do", { ...r, values: Object.keys(values ?? {}), model: b.stats.model }, { session: name ?? "main", values });
   const actions = r.actions.map(h => h.event ? `(event) ${h.event}` : [h.action, h.key, h.element, h.value && `<- values.${h.value}`, h.option && `<- "${h.option}"`, h.destination && `-> ${h.destination}`, h.error && `ERROR: ${h.error}`].filter(Boolean).join(" "));
   const { status, url, title, done_score, jev_calls, ms } = r; const out = { status, url, title, actions, done_score, jev_calls, ms };
-  for (const k of ["info", "pending", "accounts", "page_text", "candidates"]) if (r[k]) out[k] = r[k];
+  for (const k of ["info", "pending", "accounts", "recipe", "page_text", "candidates"]) if (r[k]) out[k] = r[k];
   if (explain) out.rounds = r.rounds.map(({ candidates, ...round }) => round);
   if (trace) out.trace = trace;
   Object.assign(out, await siteToolNames(b));

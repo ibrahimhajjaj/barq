@@ -6,6 +6,10 @@ import { chromium } from "playwright";
 import { isSecret, forJev, resolveValue } from "../src/secrets.mjs";
 import { JevBrowser } from "../src/session.mjs";
 import { formatPage } from "../src/page-model.mjs";
+import { RecipeBook } from "../src/recipes.mjs";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 let browser;
 before(async () => { browser = await chromium.launch({ headless: true }); });
@@ -170,6 +174,22 @@ test("a named account is picked before a pre-filled form is submitted", async t 
   const none = await b.do("Log in", { values: { username: "autofill:carol", password: "autofill" } });
   assert.equal(none.status, "needs_login");
   assert.deepEqual(none.accounts, ["Uni (alice)", "Uni (bob)"]);
+});
+
+test("a replayed login picks the named account before it submits", async t => {
+  const { b } = await menuPage(t, TWO);
+  const dir = mkdtempSync(join(tmpdir(), "jev-recipes-"));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  b.recipes = new RecipeBook({ file: join(dir, "recipes.json") });
+  submitter(b);
+  const values = { username: "autofill:bob", password: "autofill" };
+  assert.equal((await b.do("Log in", { values })).recipe, "recorded");
+  await b.page.reload();
+  await b.page.fill("#u", "alice"); await b.page.fill("#p", "pw-alice");
+  const r = await b.do("Log in", { values });
+  assert.equal(r.recipe, "replayed");
+  assert.equal(await b.page.title(), "as bob");
+  assert.deepEqual(r.actions.map(h => h.action), ["type", "click"]);
 });
 
 test("with several saved logins and none named, autofill lists them instead of guessing", async t => {

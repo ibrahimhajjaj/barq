@@ -17,9 +17,10 @@ const settledWithin = (p, ms) => Promise.race([p.then(() => true, () => true), s
 
 export class SessionPool {
   // idleMs: let go of the browser after this long without calls (0 = never). Sessions keep their
-  // last URL and reopen it on the next call.
-  constructor({ open = () => openBrowser(), highlight = false, idleMs = 0 } = {}) {
-    this.open = open; this.highlight = highlight; this.idleMs = idleMs;
+  // last URL and reopen it on the next call. recipes: the RecipeBook every session records to and
+  // replays from.
+  constructor({ open = () => openBrowser(), highlight = false, idleMs = 0, recipes = null } = {}) {
+    this.open = open; this.highlight = highlight; this.idleMs = idleMs; this.recipes = recipes;
     this.sessions = new Map();
     this.handle = null;
   }
@@ -108,7 +109,7 @@ export class SessionPool {
     const replacing = s.hadTab;
     await this.discard(s);
     const page = await host.newTab({ session: s.name });
-    s.jb = await JevBrowser.forPage(page, { highlight: this.highlight, front: host.front ? p => host.front(p) : null });
+    s.jb = await JevBrowser.forPage(page, { highlight: this.highlight, front: host.front ? p => host.front(p) : null, recipes: this.recipes });
     s.host = host; s.hadTab = true;
     if (replacing && s.lastUrl) await s.jb.open(s.lastUrl).catch(() => {});
     return replacing;
