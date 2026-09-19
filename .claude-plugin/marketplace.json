@@ -1,6 +1,6 @@
 {
   "name": "barq",
-  "description": "barq: fast browser hands for coding agents.",
+  "description": "barq: fast browser hands for coding agents, powered by Jev (TypeSafe's decision model).",
   "owner": {
     "name": "Ibrahim Hajjaj",
     "url": "https://github.com/ibrahimhajjaj"

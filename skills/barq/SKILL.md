@@ -1,6 +1,6 @@
 ---
 name: barq
-description: Drive a web browser fast through the barq MCP tools (browser_open, browser_do, browser_read, browser_check...). Use for any task that needs a real browser: going to a site, logging in, filling forms, clicking through a flow, reading or checking what a page says, or testing a web app. Prefer it over screenshot-driven browsing for multi-step flows.
+description: Drive a web browser fast through the barq MCP tools (browser_open, browser_do, browser_read, browser_check...), where Jev, a small decision model, does each click. Use for any task that needs a real browser: going to a site, logging in, filling forms, clicking through a flow, reading or checking what a page says, or testing a web app. Prefer it over screenshot-driven browsing for multi-step flows.
 ---
 
 # barq
