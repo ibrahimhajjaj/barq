@@ -234,12 +234,15 @@ export class LaunchedBrowser {
   kind = "launch";
 
   static async launch({ headed = false, channel, userDataDir, viewport = { width: 1280, height: 800 }, slowMo = 0 } = {}) {
+    // Sites outside the WebMCP origin trial can't register tools unless the browser allows it;
+    // in a browser this tool starts, let them.
+    const args = ["--enable-blink-features=WebMCP"];
     try {
       if (userDataDir) {
-        const context = await chromium.launchPersistentContext(userDataDir, { headless: !headed, channel, viewport, slowMo });
+        const context = await chromium.launchPersistentContext(userDataDir, { headless: !headed, channel, viewport, slowMo, args });
         return new LaunchedBrowser(null, context);
       }
-      const browser = await chromium.launch({ headless: !headed, channel, slowMo });
+      const browser = await chromium.launch({ headless: !headed, channel, slowMo, args });
       return new LaunchedBrowser(browser, await browser.newContext({ viewport }));
     } catch (e) {
       if (/Executable doesn't exist/i.test(String(e.message)) && !channel) throw new Error("Chromium for Playwright is not installed. Run: npx playwright install chromium");
