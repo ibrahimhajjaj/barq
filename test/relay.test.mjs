@@ -70,6 +70,7 @@ test("the relay refuses web pages and callers without its token, and never close
   assert.match((await raw(relay.url, { id: 7, method: "Browser.getVersion" })).result.product, /Chrome/);
   assert.equal((await raw(relay.url, { id: 2, method: "Target.getTargets", sessionId: "not-mine" })).error.code, -32001);
   assert.deepEqual(await raw(relay.url, { id: 3, method: "Browser.close" }), { id: 3, result: {} });
+  assert.deepEqual(await raw(relay.url, { id: 4, method: "Browser.crash" }), { id: 4, result: {} });
   await sleep(500);
   assert.equal(br.proc.exitCode, null, "the browser is still running");
 });

@@ -17,7 +17,9 @@ import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { WebSocket, WebSocketServer } from "ws";
 
-const IDLE_MS = Number(process.env.JEV_BROWSER_RELAY_IDLE_MIN ?? 60) * 60_000;
+// The browser shows its "controlled by automated software" bar while the connection is open, so it
+// isn't kept for long once nobody uses it.
+const IDLE_MS = Number(process.env.JEV_BROWSER_RELAY_IDLE_MIN ?? 30) * 60_000;
 const MAX_MESSAGE = 512 * 1024 * 1024;   // screenshots and page captures can be large
 
 export function stateDir({ platform = process.platform, env = process.env, home = os.homedir() } = {}) {
@@ -100,7 +102,7 @@ export async function startRelay(upstream, { idleMs = IDLE_MS, onExit = () => {}
       const sessionId = msg.sessionId ?? c.root;
       if (owner.get(sessionId) !== c) return deliver(c, { id: msg.id, sessionId: msg.sessionId, error: { code: -32001, message: "Session with given id not found." } });
       // the browser is the user's: a client may leave it, never close it
-      if (msg.method === "Browser.close") { deliver(c, { id: msg.id, result: {} }); return ws.close(); }
+      if (msg.method === "Browser.close" || msg.method === "Browser.crash" || msg.method === "Browser.crashGpuProcess") { deliver(c, { id: msg.id, result: {} }); return ws.close(); }
       const id = nextId++;
       pending.set(id, { client: c, id: msg.id, method: msg.method });
       send({ ...msg, id, sessionId });
