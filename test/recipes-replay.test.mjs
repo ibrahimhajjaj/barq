@@ -391,6 +391,38 @@ test("a flow held at a confirmation stop goes on only with the same values on th
   assert.equal(await sent(), "alice;");
 });
 
+test("a goal that counts from what the page has now is neither replayed nor recorded", async t => {
+  const MORE = `${"<button>Result</button>".repeat(5)}<button onclick="for (let k = 0; k < 5; k++) this.insertAdjacentHTML('beforebegin', '<button>Result</button>')">Load more</button>`;
+  const { b } = await session(t, MORE);
+  // Jev: the goal wants 5 more "Result" buttons than the page has, and the next action is "Load more"
+  const counts = () => {
+    b.call = async (state, questions) => {   // stands in for Jev
+      const answers = {};
+      for (const name of Object.keys(questions)) { const q = questions[name];
+        if (name === "counts") answers.counts = { noul: 0.95 };
+        else if (name === "cmp") answers.cmp = { choice: "at least", probabilities: { "at least": 0.9 } };
+        else if (name === "relative") answers.relative = { choice: "more", probabilities: { more: 0.9 } };
+        else if (name === "kind") answers.kind = { choice: 'button "Result"', probabilities: { 'button "Result"': 0.9 } };
+        else if (q.type === "noul") answers[name] = { noul: 0.9 };
+      }
+      return { answers };
+    };
+    b.decide = async page => answer({ target: el(page, e => e.text === "Load more"), done: 0.9 });
+  };
+  const results = () => b.page.$$eval("button", l => l.filter(x => x.textContent === "Result").length);
+  counts();
+  let r = await b.do("Load 5 more results");
+  assert.equal(r.status, "done", r.info);
+  assert.equal(r.recipe, undefined);
+  assert.equal(await results(), 10);
+  await b.page.setContent(MORE);
+  counts();
+  r = await b.do("Load 5 more results");
+  assert.equal(r.status, "done", r.info);
+  assert.equal(r.recipe, undefined);
+  assert.equal(await results(), 10, "5 more than the page had when the step started");
+});
+
 test("a confirm dialog opened by a replayed action is handed back as in the loop", async t => {
   const CLEAN = `<button onclick="document.body.dataset.c = confirm('Permanently delete 3 files?')">Clean up</button>`;
   const { b } = await session(t, CLEAN);
