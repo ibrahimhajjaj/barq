@@ -21,9 +21,23 @@ export function recipeFile(env = process.env, platform = process.platform) {
   return join(base, "barq", "recipes.json");
 }
 
-// Where a step starts: origin and path, not the query or fragment (those carry search terms, ids).
+// Query parameters that only say where a visit came from, not what the page shows.
+const TRACKING = /^(utm_\w+|mc_\w+|gclid|gclsrc|dclid|gbraid|wbraid|fbclid|msclkid|yclid|twclid|ttclid|igshid|_ga|_gl|_hsenc|_hsmi|mkt_tok|srsltid)$/i;
+
+// Which page a step is on: origin, path, query and fragment. A record's id in the query or the
+// fragment makes it another page with the same controls, so a step on item A is never taken for
+// one on item B. The query is put in a steady order without tracking parameters, and query and
+// fragment are read decoded, so a value typed into a search can be masked in them.
 export function place(url) {
-  try { const u = new URL(url); return u.origin + u.pathname.replace(/\/+$/, ""); } catch { return String(url); }
+  let u;
+  try { u = new URL(url); } catch { return String(url); }
+  const esc = s => s.replace(/[%&=#]/g, encodeURIComponent);
+  // a stable sort: a parameter given twice keeps the order of its values
+  const query = [...u.searchParams].filter(([k]) => !TRACKING.test(k)).sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0)
+    .map(([k, v]) => `${esc(k)}=${esc(v)}`).join("&");
+  let hash = u.hash.slice(1);
+  try { hash = decodeURIComponent(hash); } catch {}
+  return u.origin + u.pathname.replace(/\/+$/, "") + (query ? `?${query}` : "") + (hash ? `#${hash}` : "");
 }
 
 export function recipeKey(goal, url, values = {}) {
@@ -86,8 +100,9 @@ export function findElement(d, elements, values = {}) {
   return byNear.length === 1 ? byNear[0] : null;
 }
 
-// Recipes in the fingerprinted form carry this. Older ones kept page text: never used, and dropped.
-const FORMAT = 2;
+// Recipes carry this. Older ones kept page text, or told pages apart without their query and
+// fragment: never used, and dropped.
+const FORMAT = 3;
 
 // Several processes can share the file (one MCP server per agent session), so every change
 // re-reads it first and writes it back atomically: a concurrent write can be lost, the file can't be torn.

@@ -78,6 +78,8 @@ test("values are replayed by name, and what they contained never reaches the rec
   assert.equal((await b.do("Search and open the result", { values: { q: "cats" } })).recipe, "recorded");
   assert.equal(await b.page.evaluate(() => location.hash), "#cats");
 
+  // the search page again: without the result's fragment, which makes it another page
+  await b.page.goto("about:blank");
   await b.page.setContent(page);
   const n = jev(b, () => finished(0.95));
   const r = await b.do("Search and open the result", { values: { q: "dogs" } });
@@ -120,6 +122,39 @@ test("the recipe file holds none of the page's words, and still replays", async 
   assert.equal(n.decide, 1);
   assert.equal(r.actions[0].option, "Obsidian");
   assert.equal(new URL(b.page.url()).pathname, "/kumquat/lagoon");
+});
+
+test("a recipe is tied to its page's query and fragment, and not to tracking parameters", async t => {
+  const { b } = await session(t, "");
+  await b.page.route("https://items.test/**", route => route.fulfill({ contentType: "text/html", body: `<button onclick="document.body.dataset.added = 1">Add to list</button>` }));
+  const add = (page, history) => !did(history, "Add to list") ? answer({ target: el(page, e => e.text === "Add to list") }) : finished(0.95);
+  const added = () => b.page.evaluate(() => document.body.dataset.added);
+  await b.open("https://items.test/item?id=A");
+  jev(b, add);
+  assert.equal((await b.do("Add the item to my list")).recipe, "recorded");
+  // item B has the same controls, but nothing recorded on item A runs there: Jev decides
+  await b.open("https://items.test/item?id=B");
+  let n = jev(b, () => finished(0.95));
+  let r = await b.do("Add the item to my list");
+  assert.equal(r.recipe, undefined);
+  assert.equal(n.decide, 1);
+  assert.equal(await added(), undefined);
+  // item A through a tracked link is item A
+  await b.open("https://items.test/item?utm_source=x&id=A");
+  n = jev(b, () => finished(0.95));
+  r = await b.do("Add the item to my list");
+  assert.equal(r.recipe, "replayed");
+  assert.equal(n.decide, 1);
+  assert.equal(await added(), "1");
+  // a fragment tells pages apart the same way
+  await b.open("https://items.test/app#tenant=A");
+  jev(b, add);
+  assert.equal((await b.do("Add the item to my list")).recipe, "recorded");
+  await b.open("https://items.test/app#tenant=B");
+  await b.page.reload();
+  jev(b, () => finished(0.95));
+  assert.equal((await b.do("Add the item to my list")).recipe, undefined);
+  assert.equal(await added(), undefined);
 });
 
 test("a target that is gone stops the replay, and the loop finishes the step and records it again", async t => {
