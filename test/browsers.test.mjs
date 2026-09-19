@@ -52,13 +52,19 @@ test("findEndpoint reads DevToolsActivePort and ignores a stale one", async () =
 async function startBrowser({ extension = false, args: extra = [] } = {}) {
   const ext = typeof extension === "string" ? extension : EXTENSION;
   const dir = tmp();
-  const args = ["--headless=new", `--user-data-dir=${dir}`, "--remote-debugging-port=0", "--no-first-run", "--no-default-browser-check", ...extra];
+  const args = ["--disable-background-timer-throttling", "--disable-backgrounding-occluded-windows", "--disable-renderer-backgrounding", "--headless=new", `--user-data-dir=${dir}`, "--remote-debugging-port=0", "--no-first-run", "--no-default-browser-check", ...extra];
   if (extension) args.push(`--load-extension=${ext}`, `--disable-extensions-except=${ext}`);
   const proc = spawn(chromium.executablePath(), [...args, "data:text/html,<title>user tab</title>the user's own tab"], { stdio: "ignore" });
   for (let i = 0; i < 100 && !existsSync(join(dir, "DevToolsActivePort")); i++) await sleep(100);
   await sleep(300);
   const exited = new Promise(r => proc.once("exit", r));
-  const stop = async () => { proc.kill(); await exited; rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }); };
+  const stop = async () => {
+    proc.kill();
+    // A hung browser must not leave the test runner waiting forever on cleanup.
+    const timer = setTimeout(() => proc.kill("SIGKILL"), 2000);
+    try { await exited; } finally { clearTimeout(timer); }
+    rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+  };
   return { dir, proc, alive: () => proc.exitCode === null && !proc.killed, stop };
 }
 
