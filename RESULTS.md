@@ -23,16 +23,16 @@ and a TypeSafe key, about 4 minutes, three tasks at a time in a headless Chromiu
 
 ## Latest runs
 
-`e71a1b3`, everything in (settle and dropdown fixes, recipes, token sizing):
+`e3d555e`, everything in (counting in code, recipes with resume and fingerprints, token sizing,
+the cap on other sites' scripts):
 
-- **40/41 correct, 0 false done**
-- median 4.45 s per task, 219.3 s for all 41 run three at a time
-- 196 Jev calls, 364 ms each on average
-- the only miss is `ti-add-remove`, which comes back `likely_done` (see below)
+- **41/41 correct, 0 false done**
+- median 4.63 s per task, 222.8 s for all 41 run three at a time
+- 202 Jev calls, 354 ms each on average
 
-The median is up from 3.93 s two runs earlier. About 0.1 s a task is the 350 ms watch after
-each action, which stopped us from missing changes a click starts a moment later. The rest is
-Jev's own latency that day (364 ms a call against 336) and a busier machine.
+The median is up from 3.93 s earlier in the day. About 0.1 s a task is the 350 ms watch after each
+action, which stopped us missing changes a click starts a moment later; counting goals add a
+question; the rest is Jev's own latency on the day and a busier machine.
 
 ## How it moved
 
@@ -45,19 +45,22 @@ waiting for pages; Jev's own share is 300 to 400 ms a call.
 | `dbe65f4`: faster settle, page-scoped attach | 38/41 | 0 | 3.93 s | 198.5 s | 200 | 336 |
 | settle and dropdown review fixes, run 1 | 38/41 | 0 | 3.95 s | 199.0 s | 188 | 342 |
 | settle and dropdown review fixes, run 2 | 39/41 | 0 | 4.11 s | 215.6 s | 197 | 375 |
-| `e71a1b3`: barq, with recipes and token sizing | **40/41** | 0 | 4.45 s | 219.3 s | 196 | 364 |
+| `e71a1b3`: barq, with recipes and token sizing | 40/41 | 0 | 4.45 s | 219.3 s | 196 | 364 |
+| `e3d555e`: counting in code, recipe resume, fingerprints | **41/41** | 0 | 4.63 s | 222.8 s | 202 | 354 |
 
 A task or two moves between runs of the same code: live sites and the model's scores near a
 threshold both vary. Read one run's 38 against another's 39 as noise, not progress.
 
-## What still fails
+## Weak spots
 
-- **`ti-add-remove`**: "add elements until there are exactly 3 Delete buttons". Counting across
-  rounds isn't something a single-state decision model does; it stops at 2 or 4 and says
-  `likely_done`, never `done`. Write the step as three single adds, or check the count yourself.
-- **`ti-sort-table`**: "sort by last name, ascending". Knowing a table is sorted means comparing
+Every task passed in the latest run, but these are the ones that have failed before, and why:
+
+- **`ti-add-remove`** ("add elements until there are exactly 3 Delete buttons") failed in every run
+  until counting moved into code: Jev judges one page at a time and can't keep count. Now Jev names
+  what to count and code counts; it's been `done` since.
+- **`ti-sort-table`** ("sort by last name, ascending"). Knowing a table is sorted means comparing
   every row; Jev reads a state, it doesn't compare a list. The click that sorts is easy, the proof
-  isn't: it comes back `likely_done` (as in the latest run) or `stuck`, never `done`.
+  isn't: it comes back `likely_done` or `stuck`, never `done`.
 - **`ti-entry-ad`**: a modal that appears after a random delay, sometimes after the step already
   finished. Flaky by design of the page.
 - **`todomvc-coarse`** and **`webform-fine`** fail now and then on a "done" score sitting right at
@@ -80,4 +83,4 @@ three times more tokens per character than English, and a page-size cap counted 
 Arabic Wikipedia's results page overflowed Jev's request limit. Sizes are estimated in tokens now,
 and a refused request is retried at half the size.
 
-Latest run of that set: 8/8 correct, 0 false done, 29 Jev calls at 418 ms each.
+Latest run of that set: 8/8 correct, 0 false done, 29 Jev calls at 425 ms each.

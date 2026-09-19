@@ -16,13 +16,25 @@ is the next move irreversible, which tool, which element, which value), act, rep
 is unsure about becomes a status the agent handles (`likely_done`, `ambiguous`, `stuck`), never a
 guess passed off as success. "0 false done" is the number we protect above speed.
 
+## Counting is code's job
+
+"Add elements until there are exactly 3" defeated Jev: it judges one page at a time, and a page
+with two or four of something looks about as finished as one with three. So when a goal reads like
+a count (counting words, or a number followed by a plural), one question asks Jev whether it
+really is one, of how many, and compared how (exactly, at least, at most; a total or that many
+more). Each round Jev names which kind of element is being counted, choosing among the kinds on the
+page; code counts them, tells Jev the progress, and decides "done" itself. Goals that only mention
+a number ("Select Option 7") never pay for the question.
+
 ## When is a page ready?
 
 The loop spends most of its time waiting, so "settled" has a precise meaning here:
 
 - the document has finished loading;
 - no document, fetch, xhr or script request that the last action started is still running (young
-  ones only: a long-poll isn't loading), given up after about 3 s;
+  ones only: a long-poll isn't loading), given up after about 3 s. A script from another site
+  counts for a second at most: enough for code the page needs from its CDN, too short for a lazy
+  ad or analytics script to hold the step;
 - the DOM in every frame has been quiet for 150 ms, and at least 350 ms have passed since the
   action ended, for work a click schedules a moment later;
 - no new tab that a click asked for is still on its way.
@@ -112,19 +124,26 @@ tools marked as changing things are held for confirmation like any other irrever
 
 ## Replaying what worked
 
-A step that ends `done` with every action successful is saved per goal and page, with values by
-name only (text on the page that repeats a value is saved as the value's name, too). The same step
-on the same page replays those actions without Jev. The loop's next round then looks at the result,
-so a replay costs one Jev call and never claims "done" by itself. Anything that doesn't match (a
+A step that ends `done` with every action successful is saved per goal and page. The same step on
+the same page replays those actions without Jev, and the loop's next round looks at the result, so
+a replay costs one Jev call and never claims "done" by itself. Anything that doesn't match (a
 renamed button, a look-alike in a different row, a missing value, a checkbox already in the state
-the step leaves it) hands back to the normal loop, and a control that commits something stops for
-confirmation as it would in the loop. After such a stop the next call carries on from where the
-page is, without replaying: starting over would repeat what already ran.
+the step leaves it) hands back to the normal loop.
+
+A flow with a pay or delete step stops there for confirmation, as it would in the loop. The next
+call for the same goal goes on from the action it stopped at, never from the start, and the whole
+flow is recorded under the page it began on. If anything changed in between (another goal, other
+values, the page, the caller acting by hand), it neither replays nor records.
+
+The recipe file keeps no text from the user's pages: names, nearby text, addresses and the goal
+are stored as 64-bit fingerprints, values are masked as their names before hashing, and replay
+compares fingerprints taken the same way from the live page. A fingerprint can't be read back,
+though a short common label could be guessed and confirmed; the file is readable only by its owner.
 
 ## What still breaks
 
-- Counting ("add until there are three") and judging many values at once (is this sorted?).
-  Jev reads a state; it doesn't compare a list. Those steps come back `likely_done` or `stuck`.
+- Judging many values at once (is this table sorted?). Jev reads a state; it doesn't compare a
+  list. Those steps come back `likely_done` or `stuck`, never `done`.
 - Ordered sub-goals in one call. Split them.
 - Sites that serve nothing to automated browsers. Use your own browser.
 - Captchas. By design, they come back `blocked`.
