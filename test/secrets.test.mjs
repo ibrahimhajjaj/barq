@@ -1,6 +1,7 @@
 // Offline tests: secrets stay out of Jev's view, out of results, and are resolved only when typed.
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
+import http from "node:http";
 import { chromium } from "playwright";
 import { isSecret, forJev, resolveValue } from "../src/secrets.mjs";
 import { JevBrowser } from "../src/session.mjs";
@@ -8,10 +9,10 @@ import { formatPage } from "../src/page-model.mjs";
 
 let browser;
 before(async () => { browser = await chromium.launch({ headless: true }); });
-after(() => browser.close());
+after(async () => { await browser.close(); await isolated?.close(); });
 
 test("secret names and references are recognised; ordinary values are not", () => {
-  for (const [k, v] of [["password", "x"], ["new_pwd", "x"], ["pin", "1234"], ["otp", "1"], ["api_token", "x"], ["card_number", "x"], ["email", "keychain:mail"], ["user", "autofill"]]) assert.ok(isSecret(k, v), k);
+  for (const [k, v] of [["password", "x"], ["new_pwd", "x"], ["pin", "1234"], ["otp", "1"], ["api_token", "x"], ["card_number", "x"], ["email", "keychain:mail"], ["user", "autofill"], ["login", "autofill:bob"]]) assert.ok(isSecret(k, v), k);
   for (const [k, v] of [["email", "a@b.com"], ["shipping_city", "Cairo"], ["todo", "walk the dog"], ["query", "flaky screenshot"]]) assert.ok(!isSecret(k, v), k);
   assert.deepEqual(forJev({ email: "a@b.com", password: "hunter22", site: "bw:github.com" }), { email: "a@b.com", password: "(a secret value, hidden)", site: "(a secret value, hidden)" });
 });
@@ -81,4 +82,68 @@ test("autofill waits for the browser to fill the field, and says so when it does
   assert.equal(await b.page.inputValue("#u"), "filled-by-manager");
   await assert.rejects(b.act({ tool: "type", target: v, value: "autofill" }), /didn't fill this field/);
   await b.close();
+});
+
+// Stands in for a manager that lists saved logins in its own cross-origin frame under the password
+// field, with the rows inside a closed shadow root that page scripts can't enter.
+const MENU = `<body><script>
+  const logins = JSON.parse(decodeURIComponent(location.hash.slice(1)));
+  const host = document.body.appendChild(document.createElement("div")), root = host.attachShadow({ mode: "closed" });
+  const ul = root.appendChild(document.createElement("ul"));
+  setTimeout(() => { for (const l of logins) {
+    const li = ul.appendChild(document.createElement("li")), row = li.appendChild(document.createElement("div"));
+    const fill = row.appendChild(document.createElement("button"));
+    fill.className = "fill-cipher-button"; fill.setAttribute("aria-label", "Fill credentials for " + l.name); fill.setAttribute("aria-description", "username: " + l.user);
+    fill.innerHTML = '<span class="cipher-details"><span class="cipher-name"></span><span class="cipher-subtitle"></span></span>';
+    fill.querySelector(".cipher-name").textContent = l.name; fill.querySelector(".cipher-subtitle").textContent = l.user;
+    fill.style.cssText = "display:block;width:200px;height:40px";
+    fill.onclick = () => parent.postMessage(l, "*");
+    row.appendChild(document.createElement("button")).className = "view-cipher-button";
+  } }, 200);
+</script>`;
+const LOGIN = logins => `<form><input id=u name=username><input id=p type=password name=password></form><script>
+  p.addEventListener("click", () => {
+    if (document.querySelector("iframe")) return;
+    const f = document.createElement("iframe");
+    f.src = "http://127.0.0.1:" + location.port + "/overlay/menu-list.html#" + encodeURIComponent(${JSON.stringify(JSON.stringify(logins))});
+    f.style.cssText = "position:absolute;left:10px;top:60px;width:240px;height:" + (48 * ${logins.length} + 20) + "px;border:0";
+    document.body.appendChild(f);
+  });
+  addEventListener("message", e => { u.value = e.data.user; p.value = "pw-" + e.data.user; document.querySelector("iframe")?.remove(); });
+</script>`;
+
+// A browser that keeps cross-origin frames in their own process, as extension frames always are.
+let isolated;
+async function menuPage(t, logins) {
+  isolated ??= await chromium.launch({ args: ["--site-per-process"] });
+  const server = http.createServer((req, res) => { res.setHeader("content-type", "text/html"); res.end(req.url.startsWith("/overlay/") ? MENU : LOGIN(logins)); });
+  await new Promise(r => server.listen(0, r));
+  const b = await JevBrowser.launch({ browser: isolated });
+  t.after(async () => { await b.close(); server.closeAllConnections(); server.close(); });
+  b.passwordMenu = /\/overlay\/menu-list\.html/;
+  await b.open(`http://localhost:${server.address().port}/`);
+  const [u] = (await b.snapshot()).elements.map(e => e.i);
+  return { b, u };
+}
+
+const TWO = [{ name: "Uni", user: "alice" }, { name: "Uni", user: "bob" }];
+
+test("autofill:<account> picks that login from the manager's menu", async t => {
+  const { b, u } = await menuPage(t, TWO);
+  await b.act({ tool: "type", target: u, value: "autofill:bob" });
+  assert.equal(await b.page.inputValue("#u"), "bob");
+  assert.equal(await b.page.inputValue("#p"), "pw-bob");
+});
+
+test("with several saved logins and none named, autofill lists them instead of guessing", async t => {
+  const { b, u } = await menuPage(t, TWO);
+  await assert.rejects(b.act({ tool: "type", target: u, value: "autofill" }), e => e.code === "AUTOFILL_WHICH" && e.accounts.join() === "Uni (alice),Uni (bob)");
+  assert.equal(await b.page.inputValue("#u"), "");
+  await assert.rejects(b.act({ tool: "type", target: u, value: "autofill:carol" }), /no single saved login matches "carol"/);
+});
+
+test("a single saved login is picked without naming it", async t => {
+  const { b, u } = await menuPage(t, TWO.slice(0, 1));
+  await b.act({ tool: "type", target: u, value: "autofill" });
+  assert.equal(await b.page.inputValue("#u"), "alice");
 });

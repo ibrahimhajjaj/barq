@@ -5,15 +5,19 @@
 //   keychain:<service>[/<account>]           the macOS login keychain
 //   bw:<item>[/password|/username|/totp]     the Bitwarden CLI (needs an unlocked vault, BW_SESSION)
 //   env:<NAME>                               an environment variable of this process
-//   autofill                                 let the browser's password manager fill the field
+//   autofill[:<account>]                     let the browser's password manager fill the field;
+//                                            with several saved logins, the one whose name or
+//                                            username contains <account>
 import { execFile } from "node:child_process";
 
 export const AUTOFILL = "autofill";
+// The account part of an autofill value: "" for plain "autofill", null for any other value.
+export const autofillAccount = value => String(value).match(/^autofill(?::(.*))?$/s)?.[1]?.trim() ?? (value === AUTOFILL ? "" : null);
 const REFERENCE = /^(keychain|bw|env):(.+)$/s;
 const SECRET_NAME = /pass|pwd|(^|[^a-z])pin([^a-z]|$)|otp|2fa|mfa|token|secret|card|cvv|cvc|security.?code|ssn|iban/i;
 
 export function isSecret(name, value) {
-  return SECRET_NAME.test(name) || REFERENCE.test(String(value)) || value === AUTOFILL;
+  return SECRET_NAME.test(name) || REFERENCE.test(String(value)) || autofillAccount(value) !== null;
 }
 
 // What Jev may see of the values: every name, and the contents of the ones that aren't secret.

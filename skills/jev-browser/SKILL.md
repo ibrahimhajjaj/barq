@@ -47,7 +47,9 @@ never shown to the decision model or returned:
   run `bw unlock` and given the tool BW_SESSION).
 - `"env:<NAME>"`: an environment variable of the MCP server.
 - `"autofill"`: click the field and let the browser's password manager fill it (works in the
-  user's own browser, where their passwords are saved).
+  user's own browser, where their passwords are saved). When the site has several saved logins,
+  pass `"autofill:<account>"` with part of the login's name or username. Without it the step stops
+  with `needs_login` and `accounts` lists them: ask the user which one, never guess.
 
 ## Sessions
 

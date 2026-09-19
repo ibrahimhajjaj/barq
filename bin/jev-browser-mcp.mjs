@@ -75,14 +75,14 @@ server.registerTool("browser_do", {   // one outcome, Jev choosing each action
     "Reach ONE outcome you could see on the current page. A fast decision model, Jev, chooses every element, action and value; it can't plan or write text, so:",
     "- Give one outcome per call (\"Log in\", \"Put the Backpack in the cart\", \"Open the Pull requests tab\"); steps that must happen in order are separate calls.",
     "- Everything to type, every option to pick and every file to upload goes in `values`, under names that say what it is ({email, password}).",
-    "- For secrets, pass a reference instead of the secret: \"keychain:<service>[/<account>]\", \"bw:<item>[/password|/username|/totp]\" (Bitwarden CLI), \"env:<NAME>\", or \"autofill\" to let the browser's password manager fill the field. Values whose names look secret (password, pin, otp, token, card...) and all references are never shown to the decision model or returned.",
+    "- For secrets, pass a reference instead of the secret: \"keychain:<service>[/<account>]\", \"bw:<item>[/password|/username|/totp]\" (Bitwarden CLI), \"env:<NAME>\", or \"autofill\" to let the browser's password manager fill the field (\"autofill:<account>\" picks one of several saved logins by part of its name or username; with several and none named, the step stops with needs_login and lists them in `accounts`). Values whose names look secret (password, pin, otp, token, card...) and all references are never shown to the decision model or returned.",
     "- Give an open-ended goal an end you can count (\"until at least 3 new results are shown\").",
     "Statuses: done | likely_done (Jev is unsure the goal is met: verify with browser_check or browser_snapshot before moving on) | needs_login (sign-in wall and no credentials given: ask the user to log in, or pass credentials in values) | needs_confirmation (next click looks irreversible: re-call with allow_irreversible=true only if the user wants it) | error (page shows an error) | blocked | stuck | ambiguous (see candidates; use browser_act) | max_actions | timeout (ran out of time; see actions).",
     "After a step that changes something, confirm with browser_check that nothing else changed with it.",
   ].join("\n"),
   inputSchema: {
     goal: z.string().describe("One outcome you could see on the page"),
-    values: z.record(z.string(), z.string()).optional().describe("Named strings Jev may type/select/upload, or secret references (keychain:, bw:, env:, autofill)"),
+    values: z.record(z.string(), z.string()).optional().describe("Named strings Jev may type/select/upload, or secret references (keychain:, bw:, env:, autofill[:<account>])"),
     max_actions: z.number().int().min(1).max(30).optional().describe("Actions allowed in this step. Default 10"),
     timeout_s: z.number().int().min(5).max(600).optional().describe("Time limit for the whole step. Default 90"),
     allow_irreversible: z.boolean().optional().describe("Go ahead with actions that are hard to undo: ordering, paying, sending, deleting"),
@@ -94,7 +94,7 @@ server.registerTool("browser_do", {   // one outcome, Jev choosing each action
   const trace = traces.write("do", { ...r, values: Object.keys(values ?? {}), model: b.stats.model }, { session: name ?? "main", values });
   const actions = r.actions.map(h => h.event ? `(event) ${h.event}` : [h.action, h.key, h.element, h.value && `<- values.${h.value}`, h.option && `<- "${h.option}"`, h.destination && `-> ${h.destination}`, h.error && `ERROR: ${h.error}`].filter(Boolean).join(" "));
   const { status, url, title, done_score, jev_calls, ms } = r; const out = { status, url, title, actions, done_score, jev_calls, ms };
-  for (const key of ["info", "pending", "page_text", "candidates"]) if (r[key]) out[key] = r[key];
+  for (const k of ["info", "pending", "accounts", "page_text", "candidates"]) if (r[k]) out[k] = r[k];
   if (explain) out.rounds = r.rounds.map(({ candidates, ...round }) => round);
   if (trace) out.trace = trace;
   Object.assign(out, await siteToolNames(b));
@@ -164,7 +164,7 @@ server.registerTool("browser_act", {   // one action on a numbered element
   inputSchema: {
     action: z.enum("click type press_enter press_key select hover right_click drag upload scroll back".split(" ")),
     element: z.number().int().optional().describe("The element's number [i]; scroll, back and a key pressed on the whole page need none"),
-    value: z.string().optional().describe("Text to type (or a keychain:/bw:/env: reference, or \"autofill\"), option label to select, or file path to upload"),
+    value: z.string().optional().describe("Text to type (or a keychain:/bw:/env: reference, or \"autofill\" / \"autofill:<account>\"), option label to select, or file path to upload"),
     key: z.string().optional().describe("Which key press_key presses, such as Escape"),
     destination: z.number().int().optional().describe("For drag: the number of the element to drop on"),
     accept_dialog: z.boolean().optional().describe("Say yes to a confirm or prompt this action raises (\"Delete this item?\"). By default it is turned down"),
