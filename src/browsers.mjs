@@ -261,8 +261,9 @@ export class AttachedBrowser {
     if (!sw) return null;
     const tabId = this.tabIds?.get(page) ?? await sw.evaluate(url => self.jevFindTab(url), page.url()).catch(() => null);
     if (tabId == null) return null;
-    await sw.evaluate(id => self.jevFront(id), tabId);
-    return () => sw.evaluate(id => self.jevBack(id), tabId).catch(() => {});
+    // the helper hands back the tab that was in front, so exactly that one returns
+    const was = await sw.evaluate(id => self.jevFront(id), tabId);
+    return () => sw.evaluate(([id, back]) => self.jevBack(id, back), [tabId, was ?? null]).catch(() => {});
   }
 
   // Tries each set of Target.createTarget options in turn (headless builds refuse some of them).

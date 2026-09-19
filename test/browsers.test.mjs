@@ -191,6 +191,30 @@ test("a helper from an older copy of the extension is reloaded, then woken by a 
   assert.equal(await host.helper(1000), fresh, "checked once per connection");
 });
 
+test("the tab that was in front comes back, and does so by itself if nobody says done", async () => {
+  const chrome = await startBrowser({ extension: true });
+  try {
+    const host = await AttachedBrowser.connect(chrome.dir);
+    const page = await host.newTab({ session: "main" });
+    await page.goto(`${base}/agent`);
+    const sw = await host.helper();
+    // the user has two tabs and is on the second
+    const second = await sw.evaluate(() => chrome.tabs.create({ url: "data:text/html,<title>second</title>", active: true }).then(t => t.id));
+    const front = () => sw.evaluate(() => chrome.tabs.query({ active: true, lastFocusedWindow: true }).then(([t]) => t.id));
+    await until(async () => (await front()) === second);
+    const back = await host.front(page);
+    assert.notEqual(await front(), second);
+    await back();
+    assert.equal(await until(async () => (await front()) === second && second), second, "exactly the tab that was in front");
+    // no back(): the helper's lease brings it back
+    const agentTab = await sw.evaluate(url => self.jevFindTab(url), page.url());
+    await sw.evaluate(id => self.jevFront(id, 800), agentTab);
+    assert.notEqual(await front(), second);
+    assert.equal(await until(async () => (await front()) === second && second, 5000), second, "restored by the lease");
+    await host.dispose();
+  } finally { await chrome.stop(); }
+});
+
 test("attached without the helper: auto falls back to a separate window", async () => {
   const chrome = await startBrowser();
   try {

@@ -82,19 +82,31 @@ self.jevGroup = async ({ marker, session = "main", title = "Agent", color = "pur
 // A password manager's in-page menu lists the logins of the tab in front of its window, so for a
 // login the agent's tab has to be that tab for a moment. Switching tabs doesn't raise the window or
 // the browser. jevBack gives the user their tab back and folds the group up again if it was.
-self.jevFront = async tabId => {
+self.jevFront = async (tabId, leaseMs = 15_000) => {
   const tab = await chrome.tabs.get(tabId);
+  const [was] = await chrome.tabs.query({ active: true, windowId: tab.windowId });
   agentActivatedAt[tab.windowId] = Date.now();
   await chrome.tabs.update(tabId, { active: true });
+  // if the other side never says it's done (it crashed, or lost the connection), the user's tab
+  // comes back by itself
+  clearTimeout(leases[tabId]);
+  leases[tabId] = setTimeout(() => self.jevBack(tabId, was?.id), leaseMs);
+  return was?.id ?? null;
 };
-self.jevBack = async tabId => {
+self.jevBack = async (tabId, userTabId) => {
+  clearTimeout(leases[tabId]); delete leases[tabId];
   const tab = await chrome.tabs.get(tabId).catch(() => null);
   if (!tab) return;
   agentActivatedAt[tab.windowId] = Date.now();
-  await restoreUserTab(tab.windowId);
+  // the tab that was in front when the agent's came forward, if it's still there and still
+  // the user's; otherwise the user's latest
+  const was = userTabId != null && await chrome.tabs.get(userTabId).catch(() => null);
   const { groups } = await load();
+  if (was && !groups[was.groupId] && was.windowId === tab.windowId) await chrome.tabs.update(was.id, { active: true }).catch(() => {});
+  else await restoreUserTab(tab.windowId);
   if (groups[tab.groupId]?.collapsed) await chrome.tabGroups.update(tab.groupId, { collapsed: true }).catch(() => {});
 };
+const leases = {};
 // The agent's tab showing `url`, for tabs a page opened (their ids aren't known on the other side).
 self.jevFindTab = async url => {
   const { groups } = await load();
