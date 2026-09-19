@@ -13,14 +13,17 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
 import { SessionPool } from "../src/pool.mjs";
-import { browserConfig } from "../src/browsers.mjs";
+import { browserConfig, openBrowser } from "../src/browsers.mjs";
 import { TraceLog } from "../src/trace.mjs";
 
 const config = browserConfig();
 // Attached to the user's own browser, let go of it after a while without calls: while connected,
 // every one of their tabs reports to this process.
 const idleMin = Number(process.env.JEV_BROWSER_IDLE_MIN ?? (config.kind === "attach" ? 15 : 0));
-const pool = new SessionPool({ highlight: config.kind === "launch" && config.headed, idleMs: idleMin * 60_000 });
+// A tool call gives up after 60 s. The browser's "Allow" prompt can take longer than that to be
+// answered, so the connection gives up first, with a message that says to click it; the prompt
+// stays up and the next call finds the connection ready.
+const pool = new SessionPool({ open: () => openBrowser({ ...config, allowTimeoutMs: 45_000 }), highlight: config.kind === "launch" && config.headed, idleMs: idleMin * 60_000 });
 
 const text = value => ({ content: [{ type: "text", text: typeof value === "string" ? value : JSON.stringify(value, null, 1) }] });
 const fail = e => ({ isError: true, content: [{ type: "text", text: String(e?.message ?? e).split("\n", 1)[0] }] });
