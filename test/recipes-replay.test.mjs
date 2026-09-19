@@ -37,8 +37,8 @@ const did = (history, name) => history.some(h => h.element?.includes(name));
 
 // Stub Jev with a function of the page and history; counts its decisions and other questions.
 function jev(b, decide, other = () => ({ complete: { noul: 0.9 }, q: { noul: 0.1 } })) {
-  const n = { decide: 0, call: 0, changes: [] };
-  b.decide = async (page, goal, values, history, lastChange) => { n.decide++; n.changes.push(lastChange); return decide(page, history); };
+  const n = { decide: 0, call: 0, changes: [], histories: [] };
+  b.decide = async (page, goal, values, history, lastChange) => { n.decide++; n.changes.push(lastChange); n.histories.push(history); return decide(page, history); };
   b.call = async () => { n.call++; return { answers: other() }; };
   return n;
 }
@@ -109,7 +109,7 @@ test("a target that is gone stops the replay, and the loop finishes the step and
   assert.deepEqual(book.get(key).steps.map(s => s.target.name), ["Next", "Done"]);
 });
 
-test("a replayed action on a control that pays waits for allow_irreversible, without asking Jev", async t => {
+test("a replayed action on a control that pays waits for allow_irreversible, then pays on the next call without Jev", async t => {
   const PAY = `<button onclick="document.body.dataset.paid = 'yes'">Pay now</button>`;
   const { b, notes } = await session(t, PAY);
   jev(b, (page, history) => !did(history, "Pay") ? answer({ target: el(page, e => e.text === "Pay now") }) : finished(0.95));
@@ -122,13 +122,13 @@ test("a replayed action on a control that pays waits for allow_irreversible, wit
   assert.equal(r.pending.because, '"Pay"');
   assert.equal(await b.page.evaluate(() => document.body.dataset.paid), undefined);
   assert.deepEqual([n.decide, n.call, r.actions.length, notes.length], [0, 0, 0, 0]);
-  // allowed, the call goes on in the loop from where it stopped: a replay would start over
-  // from the first action, and whatever ran before the stop would run twice
-  const again = jev(b, (page, history) => !did(history, "Pay") ? answer({ target: el(page, e => e.text === "Pay now") }) : finished(0.95));
+  // allowed, the replay goes on from the action it stopped at; Jev only checks the result
+  const again = jev(b, () => finished(0.95));
   const r2 = await b.do("Finish the purchase", { allowIrreversible: true });
   assert.equal(r2.status, "done");
-  assert.equal(r2.recipe, undefined, "neither replayed nor recorded");
-  assert.ok(again.decide > 0);
+  assert.equal(r2.recipe, "replayed");
+  assert.deepEqual([again.decide, again.call], [1, 0]);
+  assert.deepEqual(r2.actions.map(h => h.element), ['button "Pay now"']);
   assert.equal(await b.page.evaluate(() => document.body.dataset.paid), "yes");
   // a fresh start replays again
   await b.page.setContent(PAY);
@@ -155,6 +155,114 @@ test("going on after a confirmation stop never repeats what ran before it", asyn
   assert.equal(await b.page.evaluate(() => document.body.dataset.paid), "yes");
 });
 
+// A shop on two addresses: the mug's page adds it to the cart and goes to the checkout, which pays.
+async function shop(t) {
+  const PAGES = {
+    "/mug": `<button onclick="localStorage.cart = +(localStorage.cart || 0) + 1; location.href = '/checkout'">Add to cart</button>`,
+    "/checkout": `<p>Your cart</p><button onclick="localStorage.paid = +(localStorage.paid || 0) + 1; document.title = 'paid'; document.body.append('Thank you')">Pay now</button>`,
+  };
+  const s = await session(t, "");
+  await s.b.page.route("https://shop.test/**", route => route.fulfill({ contentType: "text/html", body: PAGES[new URL(route.request().url()).pathname] ?? "" }));
+  const start = async () => { await s.b.open("https://shop.test/mug"); await s.b.page.evaluate(() => localStorage.clear()); };
+  const cart = () => s.b.page.evaluate(() => localStorage.cart), paid = () => s.b.page.evaluate(() => localStorage.paid);
+  // Jev: add the mug, then pay
+  const buy = page => page.text.includes("Thank you") ? finished(0.95)
+    : page.url.endsWith("/mug") ? answer({ target: el(page, e => e.text === "Add to cart") }) : answer({ target: el(page, e => e.text === "Pay now") });
+  return { ...s, start, cart, paid, buy };
+}
+
+test("a flow stopped for confirmation is recorded whole under its first page, then replays end to end", async t => {
+  const { b, book, start, cart, buy } = await shop(t);
+  await start();
+  let n = jev(b, buy);
+  let r = await b.do("Buy the mug");
+  assert.equal(r.status, "needs_confirmation", r.info);
+  assert.equal(r.recipe, undefined);
+  // the next call goes on at the checkout, knowing the mug is in the cart, and records the whole flow
+  n = jev(b, buy);
+  r = await b.do("Buy the mug", { allowIrreversible: true });
+  assert.equal(r.status, "done", r.info);
+  assert.equal(r.recipe, "recorded");
+  assert.deepEqual(r.actions.map(h => h.element), ['button "Pay now"']);
+  assert.ok(did(n.histories[0], "Add to cart"), "Jev sees what ran before the stop");
+  assert.equal(await cart(), "1");
+  assert.deepEqual(book.get(recipeKey("Buy the mug", "https://shop.test/mug")).steps.map(s => s.target.name), ["Add to cart", "Pay now"]);
+  assert.equal(book.get(recipeKey("Buy the mug", "https://shop.test/checkout")), null);
+
+  // from the start again: the replay adds the mug and stops at Pay, then pays when allowed
+  await start();
+  n = jev(b, () => finished(0.95));
+  r = await b.do("Buy the mug");
+  assert.equal(r.status, "needs_confirmation", r.info);
+  assert.equal(r.pending.because, '"Pay"');
+  assert.equal(n.decide, 0);
+  r = await b.do("Buy the mug", { allowIrreversible: true });
+  assert.equal(r.status, "done", r.info);
+  assert.equal(r.recipe, "replayed");
+  assert.equal(n.decide, 1, "only the round that checks the result");
+  assert.equal(await b.page.title(), "paid");
+  assert.equal(await cart(), "1");
+});
+
+test("a different goal in between ends the held flow", async t => {
+  const { b, book, start, cart, buy } = await shop(t);
+  await start();
+  jev(b, buy);
+  assert.equal((await b.do("Buy the mug")).status, "needs_confirmation");
+  assert.equal(await cart(), "1");
+  jev(b, () => finished(0.95));
+  await b.do("Look at the cart");
+  // a new call at the checkout: Jev starts without the earlier actions, and only this call's are recorded
+  const n = jev(b, buy);
+  const r = await b.do("Buy the mug", { allowIrreversible: true });
+  assert.equal(r.status, "done", r.info);
+  assert.equal(r.recipe, "recorded");
+  assert.deepEqual(n.histories[0], []);
+  assert.equal(await cart(), "1");
+  assert.equal(book.get(recipeKey("Buy the mug", "https://shop.test/mug")), null);
+  assert.equal(book.get(recipeKey("Buy the mug", "https://shop.test/checkout")).steps.length, 1);
+});
+
+test("after the caller acts by hand, the next call neither goes on with the flow nor starts over", async t => {
+  const { b, start, cart, paid, buy } = await shop(t);
+  await start();
+  jev(b, buy);
+  await b.do("Buy the mug");
+  await b.do("Buy the mug", { allowIrreversible: true });
+  await start();
+  jev(b, () => finished(0.95));
+  assert.equal((await b.do("Buy the mug")).status, "needs_confirmation");
+  const pay = +(await b.snapshotText()).match(/\[(\d+)\] button "Pay now"/)[1];
+  await b.actOn({ action: "click", element: pay, allowIrreversible: true });
+  jev(b, buy);
+  const r = await b.do("Buy the mug", { allowIrreversible: true });
+  assert.equal(r.status, "done", r.info);
+  assert.deepEqual(r.actions, []);
+  assert.deepEqual([await cart(), await paid()], ["1", "1"]);
+});
+
+test("a held flow whose next step is gone goes on in the loop and isn't recorded", async t => {
+  const { b, book, notes, start, buy } = await shop(t);
+  await start();
+  jev(b, buy);
+  await b.do("Buy the mug");
+  await b.do("Buy the mug", { allowIrreversible: true });
+  const key = recipeKey("Buy the mug", "https://shop.test/mug"), before = book.get(key);
+  await start();
+  jev(b, () => finished(0.95));
+  assert.equal((await b.do("Buy the mug")).status, "needs_confirmation");
+  // the checkout now says "Place order" instead
+  await b.page.evaluate(() => { document.querySelector("button").textContent = "Place order"; });
+  const n = jev(b, (page, history) => !did(history, "Place order") ? answer({ target: el(page, e => e.text === "Place order") }) : finished(0.95));
+  const r = await b.do("Buy the mug", { allowIrreversible: true });
+  assert.equal(r.status, "done", r.info);
+  assert.equal(r.recipe, undefined);
+  assert.equal(n.decide, 2);
+  assert.equal(await b.page.title(), "paid");
+  assert.deepEqual(book.get(key), before);
+  assert.deepEqual(notes, []);
+});
+
 test("a confirm dialog opened by a replayed action is handed back as in the loop", async t => {
   const CLEAN = `<button onclick="document.body.dataset.c = confirm('Permanently delete 3 files?')">Clean up</button>`;
   const { b } = await session(t, CLEAN);
@@ -168,6 +276,19 @@ test("a confirm dialog opened by a replayed action is handed back as in the loop
   assert.deepEqual(r.pending, { action: "click", element: 'button "Clean up"', dialog: "Permanently delete 3 files?", p_irreversible: 0.9 });
   assert.equal(await b.page.evaluate(() => document.body.dataset.c), "false");
   assert.deepEqual([n.decide, n.call], [0, 1]);
+});
+
+test("an action whose confirm dialog was dismissed runs again on the next call and is recorded once", async t => {
+  const CLEAN = `<button onclick="if (confirm('Permanently delete 3 files?')) document.body.append('Deleted')">Clean up</button>`;
+  const { b, book } = await session(t, CLEAN);
+  const clean = page => page.text.includes("Deleted") ? finished(0.95) : answer({ target: el(page, e => e.text === "Clean up") });
+  jev(b, clean, () => ({ q: { noul: 0.9 } }));
+  assert.equal((await b.do("Clean up the folder")).status, "needs_confirmation");
+  jev(b, clean);
+  const r = await b.do("Clean up the folder", { allowIrreversible: true });
+  assert.equal(r.status, "done", r.info);
+  assert.equal(r.recipe, "recorded");
+  assert.equal(book.get(recipeKey("Clean up the folder", b.page.url())).steps.length, 1);
 });
 
 test("recipe: false neither replays nor records", async t => {
@@ -209,6 +330,11 @@ test("a replay the next round doesn't confirm goes on in the loop, and is never 
   assert.equal(r.status, "stuck");
   assert.equal(r.recipe, "partly replayed");
   assert.equal(r.actions.length, 2);
+  // stopped part way: the next call for it doesn't start the replay over
+  jev(b, () => finished(0.95));
+  r = await b.do("Get through the form");
+  assert.deepEqual([r.status, r.recipe, r.actions.length], ["done", undefined, 0]);
+  assert.equal(await b.page.getByText("Continue").count(), 1);
 });
 
 test("a checkbox already in the state a step leaves it is not clicked again", async t => {
