@@ -48,9 +48,9 @@ never shown to the decision model or returned:
 - `"env:<NAME>"`: an environment variable of the MCP server.
 - `"autofill"`: click the field and let the browser's password manager fill it (works in the
   user's own browser, where their passwords are saved). When the site has several saved logins,
-  pass `"autofill:<account>"` with part of the login's name or username. Without it, a login the
-  browser already filled in on load is kept; otherwise the step stops with `needs_login` and
-  `accounts` lists them: ask the user which one, never guess.
+  pass `"autofill:<account>"` with part of the login's name or username. Without it, when the manager
+  offers several (even if the browser already filled one in), the step stops with `needs_login`
+  and `accounts` lists them: ask the user which one, never guess.
 
 ## Sessions
 

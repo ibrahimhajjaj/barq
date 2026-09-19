@@ -192,6 +192,35 @@ test("a replayed login picks the named account before it submits", async t => {
   assert.deepEqual(r.actions.map(h => h.action), ["type", "click"]);
 });
 
+test("a login the browser filled in is only kept when the manager has no other to offer", async t => {
+  const two = await menuPage(t, TWO);
+  await two.b.page.fill("#u", "alice"); await two.b.page.fill("#p", "pw-alice");
+  await assert.rejects(two.b.act({ tool: "type", target: two.u, value: "autofill" }), e => e.code === "AUTOFILL_WHICH" && e.accounts.length === 2);
+  const one = await menuPage(t, TWO.slice(0, 1));
+  await one.b.page.fill("#u", "alice"); await one.b.page.fill("#p", "pw-alice");
+  await one.b.act({ tool: "type", target: one.u, value: "autofill" });
+  assert.equal(await one.b.page.inputValue("#u"), "alice");
+});
+
+test("a pre-filled form isn't submitted with plain autofill while several logins are saved", async t => {
+  const { b } = await menuPage(t, TWO);
+  await b.page.fill("#u", "alice"); await b.page.fill("#p", "pw-alice");
+  submitter(b);
+  const r = await b.do("Log in", { values: { username: "autofill", password: "autofill" } });
+  assert.equal(r.status, "needs_login");
+  assert.deepEqual(r.accounts, ["Uni (alice)", "Uni (bob)"]);
+  assert.equal(await b.page.title(), "", "never submitted");
+});
+
+test("two different named accounts in one call stop before anything is filled", async t => {
+  const { b } = await menuPage(t, TWO);
+  submitter(b);
+  const r = await b.do("Log in", { values: { username: "autofill:alice", password: "autofill:bob" } });
+  assert.equal(r.status, "needs_login");
+  assert.match(r.info, /two different saved logins/);
+  assert.equal(await b.page.inputValue("#u"), "");
+});
+
 test("with several saved logins and none named, autofill lists them instead of guessing", async t => {
   const { b, u } = await menuPage(t, TWO);
   await assert.rejects(b.act({ tool: "type", target: u, value: "autofill" }), e => e.code === "AUTOFILL_WHICH" && e.accounts.join() === "Uni (alice),Uni (bob)");
