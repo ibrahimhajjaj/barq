@@ -132,7 +132,7 @@ server.registerTool("browser_read", {   // what the page says
 
 server.registerTool("browser_act", {   // one action on a numbered element
   title: "Act on element",
-  description: "One action on an element number taken from the latest browser_snapshot or from browser_do's candidates, with no decision model involved. The number is matched to the page as it is now; if the element has gone, take a new snapshot. A confirm or prompt the action raises is turned down unless accept_dialog is true.",
+  description: "Perform one action on an element number from the latest browser_snapshot (or from browser_do candidates). No decision model involved. Numbers are matched to the current page; if the element is gone, take a new snapshot. Confirm/prompt dialogs the action opens are dismissed unless accept_dialog is true. A control that pays, sends, posts or deletes returns needs_confirmation instead of acting, unless allow_irreversible is true.",
   inputSchema: {
     action: z.enum("click type press_enter press_key select hover right_click drag upload scroll back".split(" ")),
     element: z.number().int().optional().describe("The element's number [i]; scroll, back and a key pressed on the whole page need none"),
@@ -140,9 +140,10 @@ server.registerTool("browser_act", {   // one action on a numbered element
     key: z.string().optional().describe("Which key press_key presses, such as Escape"),
     destination: z.number().int().optional().describe("For drag: the number of the element to drop on"),
     accept_dialog: z.boolean().optional().describe("Say yes to a confirm or prompt this action raises (\"Delete this item?\"). By default it is turned down"),
+    allow_irreversible: z.boolean().optional().describe("Act even if the control pays, sends, posts or deletes; only when the user wants it"),
     session,
   },
-}, tool((b, { accept_dialog, session: _, ...args }) => b.actOn({ ...args, acceptDialog: !!accept_dialog })));
+}, tool((b, { accept_dialog, allow_irreversible, session: _, ...args }) => b.actOn({ ...args, acceptDialog: !!accept_dialog, allowIrreversible: !!allow_irreversible })));
 
 server.registerTool("browser_screenshot", {   // the page as a picture
   title: "Screenshot",
