@@ -116,9 +116,10 @@ export class RecipeBook {
     }
     this.recipes = r;
     try {
-      mkdirSync(dirname(this.file), { recursive: true });
+      // it holds bits of the pages the user worked on: theirs to read, nobody else's
+      mkdirSync(dirname(this.file), { recursive: true, mode: 0o700 });
       const tmp = `${this.file}.${process.pid}.tmp`;
-      writeFileSync(tmp, JSON.stringify(r, null, 1));
+      writeFileSync(tmp, JSON.stringify(r, null, 1), { mode: 0o600 });
       renameSync(tmp, this.file);
     } catch {}
   }
