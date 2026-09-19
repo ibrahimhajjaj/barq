@@ -135,6 +135,14 @@ test("autofill:<account> picks that login from the manager's menu", async t => {
   assert.equal(await b.page.inputValue("#p"), "pw-bob");
 });
 
+test("a named account replaces a login the browser filled in on load", async t => {
+  const { b, u } = await menuPage(t, TWO);
+  await b.page.fill("#u", "alice"); await b.page.fill("#p", "pw-alice");
+  await b.act({ tool: "type", target: u, value: "autofill:bob" });
+  assert.equal(await b.page.inputValue("#u"), "bob");
+  assert.equal(await b.page.inputValue("#p"), "pw-bob");
+});
+
 test("with several saved logins and none named, autofill lists them instead of guessing", async t => {
   const { b, u } = await menuPage(t, TWO);
   await assert.rejects(b.act({ tool: "type", target: u, value: "autofill" }), e => e.code === "AUTOFILL_WHICH" && e.accounts.join() === "Uni (alice),Uni (bob)");
