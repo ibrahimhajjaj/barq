@@ -100,6 +100,31 @@ test("a toggle that is off says so, and a field holding an essay says how much i
   await b2.close();
 });
 
+test("a question about two things is split into two, and a phrase with 'and' in it is left alone", () => {
+  const split = q => Barq.prototype.splitQuestion.call(null, q);
+  assert.deepEqual(split("Is the toggle on, and does the box hold a long prompt about music?"),
+    ["Is the toggle on?", "Does the box hold a long prompt about music?"]);
+  assert.deepEqual(split("Is the cart empty and is the total zero?"),
+    ["Is the cart empty?", "Is the total zero?"]);
+  // one thing asked about, whatever words it uses
+  assert.equal(split("Does the cart show one blue mug?"), null);
+  assert.equal(split("Does the page show terms and conditions?"), null);
+  assert.equal(split("Is the photo in black and white?"), null);
+  // a fragment too short to stand as its own question is not a second question
+  assert.equal(split("Is it done and is it?"), null);
+});
+
+test("a tab barq has not been sent anywhere says so", async () => {
+  const b2 = await Barq.launch({ browser });
+  assert.equal(b2.onBlankTab(), true, "a fresh tab is blank until it is sent somewhere");
+  // setContent leaves the address alone, so only going somewhere counts as being sent
+  await b2.page.setContent("<button>Book a seat</button>");
+  assert.equal(b2.onBlankTab(), true, "filled in place, still nowhere");
+  await b2.open("data:text/html,<title>seats</title><button>Book a seat</button>");
+  assert.equal(b2.onBlankTab(), false);
+  await b2.close();
+});
+
 test("a frame the page keeps out of sight contributes nothing, however it is hidden", async () => {
   const b2 = await Barq.launch({ browser });
   // the shapes a site uses to park a menu it has closed: display:none, off to the side, clipped by
