@@ -23,16 +23,22 @@ and a TypeSafe key, about 4 minutes, three tasks at a time in a headless Chromiu
 
 ## Latest runs
 
-`e3d555e`, everything in (counting in code, recipes with resume and fingerprints, token sizing,
-the cap on other sites' scripts):
+Everything in (counting in code, recipes with resume and fingerprints, token sizing, the cap on
+other sites' scripts, scan mode), after the source rewrite:
 
 - **41/41 correct, 0 false done**
-- median 4.63 s per task, 222.8 s for all 41 run three at a time
-- 202 Jev calls, 354 ms each on average
+- median 4.64 s per task, 208.2 s for all 41 run three at a time
+- 203 Jev calls, 379 ms each on average
 
-The median is up from 3.93 s earlier in the day. About 0.1 s a task is the 350 ms watch after each
-action, which stopped us missing changes a click starts a moment later; counting goals add a
-question; the rest is Jev's own latency on the day and a busier machine.
+The median is up from 3.93 s earlier on. About 0.1 s a task is the 350 ms watch after each action,
+which stopped us missing changes a click starts a moment later; counting goals add a question; the
+rest is Jev's own latency on the day and a busier machine.
+
+The questions in `src/session.mjs` are prompt text, and the thresholds around them were tuned
+against it. Rewording them is not cosmetic: a softer "which of the values should this use?" had Jev
+answer `password` for a username field, and a softer "is this hard to undo?" scored a checkout's
+Finish button at 0.56 instead of 0.7, which is the difference between stopping and placing an
+order. Any change to that wording needs a run of this benchmark behind it.
 
 ## How it moved
 
@@ -41,13 +47,14 @@ waiting for pages; Jev's own share is 300 to 400 ms a call.
 
 | run | correct | false done | median per task | all tasks | Jev calls | ms per call |
 |---|---|---|---|---|---|---|
-| starting point (upstream `578cff6`) | 39/41 | 0 | 4.85 s | 226.3 s | 197 | 384 |
-| `dbe65f4`: faster settle, page-scoped attach | 38/41 | 0 | 3.93 s | 198.5 s | 200 | 336 |
+| the starting point | 39/41 | 0 | 4.85 s | 226.3 s | 197 | 384 |
+| faster settle, page-scoped attach | 38/41 | 0 | 3.93 s | 198.5 s | 200 | 336 |
 | settle and dropdown review fixes, run 1 | 38/41 | 0 | 3.95 s | 199.0 s | 188 | 342 |
 | settle and dropdown review fixes, run 2 | 39/41 | 0 | 4.11 s | 215.6 s | 197 | 375 |
-| `e71a1b3`: barq, with recipes and token sizing | 40/41 | 0 | 4.45 s | 219.3 s | 196 | 364 |
-| `e3d555e`: counting in code, recipe resume, fingerprints | **41/41** | 0 | 4.63 s | 222.8 s | 202 | 354 |
-| `13786c8`: after the review fixes, with scan mode | 40/41 | 0 | 4.74 s | 227.9 s | 203 | 356 |
+| recipes and token sizing | 40/41 | 0 | 4.45 s | 219.3 s | 196 | 364 |
+| counting in code, recipe resume, fingerprints | **41/41** | 0 | 4.63 s | 222.8 s | 202 | 354 |
+| after the review fixes, with scan mode | 40/41 | 0 | 4.74 s | 227.9 s | 203 | 356 |
+| after the source rewrite | **41/41** | 0 | 4.64 s | 208.2 s | 203 | 379 |
 
 A task or two moves between runs of the same code: live sites and the model's scores near a
 threshold both vary. Read one run's 38 against another's 39 as noise, not progress.
