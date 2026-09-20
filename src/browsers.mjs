@@ -103,6 +103,12 @@ const older = (a, b) => { const x = a.split(".").map(Number), y = b.split(".").m
 export const HELPER_EXTENSION_ID = "cbkdahgldeliodgkkmlmkmakamfoejec";
 export const GROUP_COLORS = ["grey", "blue", "red", "yellow", "green", "pink", "purple", "cyan", "orange"];
 
+// Half of what names a tab group to the helper extension; the group's own title is the other half.
+// It has to outlive one connection: losing the browser and attaching again would otherwise start a
+// second group and leave the tabs opened before it stranded in the first. Another agent working in
+// the same project is another process, so it still gets a group of its own.
+const PROCESS_ID = `${process.pid}-${Math.random().toString(36).slice(2, 8)}`;
+
 // A browser the user already runs. Every tab the agent needs is created here, and only those and
 // the tabs they open are ever closed; disposing disconnects and leaves the browser and the user's
 // own tabs alone.
@@ -146,9 +152,9 @@ export class AttachedBrowser {
 
   constructor(browser, endpoint, { placement = "auto", group = {}, size = { width: 1280, height: 800 } } = {}) {
     this.browser = browser; this.endpoint = endpoint; this.placement = placement; this.size = size;
-    this.owner = Math.random().toString(36).slice(2, 10);
     this.group = { title: "Agent", color: "purple", collapsed: true, ...group };
     if (!GROUP_COLORS.includes(this.group.color)) this.group.color = "purple";
+    this.owner = `${PROCESS_ID}-${this.group.title}`;
     this.context = browser.contexts()[0];
     this.owned = new Set();
     this.helperMissedAt = placement === "window" || placement === "tab" ? Infinity : 0;
@@ -231,8 +237,8 @@ export class AttachedBrowser {
     const sw = await this.helper();
     if (sw) {
       try {
-        // one group per connection, named after the project: every session of this agent keeps its
-        // tab there, and another agent working in the same project gets a group of its own
+        // one group per process, named after the project: every session of this agent keeps its tab
+        // there, reconnects included, and another agent in the same project gets a group of its own
         const { tabId } = await sw.evaluate(args => self.jevGroup(args), { marker: this.markers.get(page), session: this.owner, ...this.group });
         (this.tabIds ??= new WeakMap()).set(page, tabId);
         return page;

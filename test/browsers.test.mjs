@@ -141,7 +141,7 @@ test("attached: tabs go in a group, a popup joins it and the user keeps their ta
   } finally { await chrome.stop(); }
 });
 
-test("groups are named after the agent's project; each connection keeps its own", async () => {
+test("groups are named after the agent's project; another agent gets its own, a reconnect does not", async () => {
   assert.equal(projectLabel("/home/u/work/shop"), "shop");
   assert.equal(projectLabel("/home/u", "/home/u"), undefined, "no project: the default name");
   assert.deepEqual(browserConfig({ BARQ_ATTACH: "edge", CLAUDE_PROJECT_DIR: "/w/jev" }, "/elsewhere").group, { title: "jev" });
@@ -155,6 +155,14 @@ test("groups are named after the agent's project; each connection keeps its own"
     const sw = await one.helper();
     const groups = await sw.evaluate(() => chrome.tabGroups.query({}).then(gs => gs.map(g => g.title).sort()));
     assert.deepEqual(groups, ["blog", "shop"], "two agents' main sessions don't share a group");
+
+    // losing the browser and attaching again is the same agent: its tabs belong in the group it
+    // already has, not in a second one beside it
+    const again = await AttachedBrowser.connect(chrome.dir, { group: { title: "shop" } });
+    await again.newTab({ session: "other" });
+    const after = await sw.evaluate(() => chrome.tabGroups.query({}).then(gs => gs.map(g => g.title).sort()));
+    assert.deepEqual(after, ["blog", "shop"], "reattaching started a second group");
+    await again.dispose();
     await one.dispose(); await two.dispose();
   } finally { await chrome.stop(); }
 });
