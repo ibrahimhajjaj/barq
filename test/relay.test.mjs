@@ -17,7 +17,7 @@ after(async () => { for (const f of cleanups.reverse()) await f(); });
 
 async function startBrowser() {
   const dir = tmp();
-  const proc = spawn(chromium.executablePath(), ["--headless=new", `--user-data-dir=${dir}`, "--remote-debugging-port=0", "--no-first-run", "--no-default-browser-check", "about:blank"], { stdio: "ignore" });
+  const proc = spawn(chromium.executablePath(), ["--headless=new", "--no-sandbox", `--user-data-dir=${dir}`, "--remote-debugging-port=0", "--no-first-run", "--no-default-browser-check", "about:blank"], { stdio: "ignore" });
   for (let i = 0; i < 100 && !existsSync(join(dir, "DevToolsActivePort")); i++) await sleep(100);
   await sleep(300);
   const exited = new Promise(r => proc.once("exit", r));

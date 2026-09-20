@@ -54,7 +54,7 @@ test("findEndpoint reads DevToolsActivePort and ignores a stale one", async () =
 async function startBrowser({ extension = false, args: extra = [] } = {}) {
   const ext = typeof extension === "string" ? extension : EXTENSION;
   const dir = tmp();
-  const args = ["--disable-background-timer-throttling", "--disable-backgrounding-occluded-windows", "--disable-renderer-backgrounding", "--headless=new", `--user-data-dir=${dir}`, "--remote-debugging-port=0", "--no-first-run", "--no-default-browser-check", ...extra];
+  const args = ["--disable-background-timer-throttling", "--disable-backgrounding-occluded-windows", "--disable-renderer-backgrounding", "--headless=new", "--no-sandbox", `--user-data-dir=${dir}`, "--remote-debugging-port=0", "--no-first-run", "--no-default-browser-check", ...extra];
   if (extension) args.push(`--load-extension=${ext}`, `--disable-extensions-except=${ext}`);
   const proc = spawn(chromium.executablePath(), [...args, "data:text/html,<title>user tab</title>the user's own tab"], { stdio: "ignore" });
   for (let i = 0; i < 100 && !existsSync(join(dir, "DevToolsActivePort")); i++) await sleep(100);
