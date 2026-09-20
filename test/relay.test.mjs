@@ -12,6 +12,8 @@ import { startRelay, relayEndpoint, stateFile } from "../src/relay.mjs";
 
 const sleep = ms => new Promise(done => setTimeout(done, ms));
 const tmp = () => mkdtempSync(join(tmpdir(), "barq-relay-"));
+// the browser may still be writing in there; a folder left in /tmp beats a failed cleanup
+const scrub = d => { try { rmSync(d, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 }); } catch {} };
 const cleanups = [];
 after(async () => { for (const f of cleanups.reverse()) { try { await f(); } catch {} } });
 
@@ -21,7 +23,7 @@ async function startBrowser() {
   for (let i = 0; i < 100 && !existsSync(join(dir, "DevToolsActivePort")); i++) await sleep(100);
   await sleep(300);
   const exited = new Promise(r => proc.once("exit", r));
-  const stop = async () => { if (proc.exitCode === null) { proc.kill(); await exited; } rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 }); };
+  const stop = async () => { if (proc.exitCode === null) { proc.kill(); await exited; } scrub(dir); };
   cleanups.push(stop);
   return { dir, proc, exited, stop, ws: (await findEndpoint(dir)).ws };
 }
@@ -157,7 +159,7 @@ test("the relay goes away with the browser", async () => {
 test("relayEndpoint starts one relay per browser run and hands every caller the same one", async () => {
   const br = await startBrowser();
   const dir = tmp();
-  cleanups.push(async () => rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 }));
+  cleanups.push(async () => scrub(dir));
   const [u1, u2] = await Promise.all([relayEndpoint(br.ws, { dir, timeoutMs: 20_000 }), relayEndpoint(br.ws, { dir, timeoutMs: 20_000 })]);
   assert.ok(u1?.startsWith("ws://127.0.0.1:"));
   assert.equal(u1, u2);

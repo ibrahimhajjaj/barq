@@ -11,6 +11,8 @@ import { scan, normalizeJobs } from "../src/scan.mjs";
 let browser, context, server, base, live = 0, peak = 0, flakyHits = 0;
 const host = { newTab: () => context.newPage() };
 const dir = mkdtempSync(join(tmpdir(), "barq-scan-"));
+// the browser may still be writing in there; a folder left in /tmp beats a failed cleanup
+const scrub = d => { try { rmSync(d, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 }); } catch {} };
 const sleep = ms => new Promise(done => setTimeout(done, ms));
 
 before(async () => {
@@ -44,7 +46,7 @@ before(async () => {
   browser = await chromium.launch({ headless: true });
   context = await browser.newContext();
 });
-after(async () => { await browser.close(); server.closeAllConnections(); server.close(); rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 }); });
+after(async () => { await browser.close(); server.closeAllConnections(); server.close(); scrub(dir); });
 
 const lines = f => readFileSync(f, "utf8").trim().split("\n").map(l => JSON.parse(l));
 
