@@ -44,12 +44,19 @@ One call, one outcome you could point at on the screen:
 browser_open("https://shop.example.com/")
 browser_do("Add the blue mug to the cart")
 browser_do("Go to checkout")
+browser_read("What does the order total come to?")  → "Total £24.00", p=0.98
 browser_check("Does the cart show one blue mug?")   → 0.97
 ```
 
 "Add two mugs, then check out" is two calls. Open-ended goals need a finish line: "scroll until at
 least 3 new results are shown". Everything to type goes in `values` with a name Jev can match to a
 field; Jev can't write text, it only chooses.
+
+To find out what a page says, `browser_read` with a question beats everything else here: one Jev
+call, the whole page rather than the part on screen, and you get back the passages that answer it
+instead of the page. `browser_check` is for a yes/no you can act on, one thing per question, and on
+a page that keeps its own history (a chat thread, a build log) it can answer "is it running now?"
+from an older entry, so read the page there instead.
 
 Statuses you get back: `done`, `likely_done` (verify it), `needs_confirmation` (the next click
 pays, sends or deletes: ask the user, then call again with `allow_irreversible`), `needs_login`,
