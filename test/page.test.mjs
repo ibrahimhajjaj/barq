@@ -80,6 +80,44 @@ test("clickable divs, images, shadow roots and frames all reach the list", () =>
   assert.ok(inner?.frame, "an element inside a frame says which frame it is in");
 });
 
+test("a toggle that is off says so, and a field holding an essay says how much is in it", async () => {
+  const b2 = await Barq.launch({ browser });
+  const essay = "Write a program that generates music in the browser.".repeat(60);
+  await b2.page.setContent(`
+    <button aria-pressed="true">Deep research</button>
+    <button aria-pressed="false">Canvas</button>
+    <div contenteditable="true" role="textbox" aria-label="Enter a prompt here">${essay}</div>`);
+  const pg = await b2.snapshot();   // listed fresh
+
+  const on = pg.elements.find(e => e.text === "Deep research"), off = pg.elements.find(e => e.text === "Canvas");
+  assert.equal(on.active, true);
+  // the point: left out, "off" and "this control has no such state" read the same to the model
+  assert.equal(off.active, false, "an explicit aria-pressed=false has to come through as off");
+
+  const box = pg.elements.find(e => e.label === "Enter a prompt here");
+  assert.ok(box.value.length > 60 && box.value.length <= 120, `value was ${box.value.length} chars`);
+  assert.equal(box.value_chars, essay.length, "a cut-off value says how long the whole thing is");
+  await b2.close();
+});
+
+test("a frame the page keeps out of sight contributes nothing, however it is hidden", async () => {
+  const b2 = await Barq.launch({ browser });
+  // the shapes a site uses to park a menu it has closed: display:none, off to the side, clipped by
+  // an ancestor, and visibility:hidden. Each frame lays out normally in its own document.
+  await b2.page.setContent(`
+    <button>Book a seat</button>
+    <iframe style="display:none" srcdoc="<button>apps menu</button>"></iframe>
+    <iframe style="position:absolute;left:-9999px;width:300px;height:200px" srcdoc="<button>parked menu</button>"></iframe>
+    <div style="height:0;overflow:hidden"><iframe style="width:300px;height:200px" srcdoc="<button>clipped menu</button>"></iframe></div>
+    <iframe style="visibility:hidden;width:300px;height:200px" srcdoc="<button>invisible menu</button>"></iframe>
+    <iframe style="width:300px;height:100px" srcdoc="<button>seat picker</button>"></iframe>`);
+  await b2.page.waitForTimeout(300);
+
+  const pg = await b2.snapshot();   // listed fresh
+  assert.deepEqual(pg.elements.map(e => e.text), ["Book a seat", "seat picker"], JSON.stringify(pg.elements.map(e => e.text)));
+  await b2.close();
+});
+
 test("what nobody can see or click is left out", () => {
   assert.equal(find(e => e.text === "Never shown"), undefined);
   assert.equal(find(e => e.text === "Under the sheet"), undefined);
