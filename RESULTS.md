@@ -55,9 +55,12 @@ waiting for pages; Jev's own share is 300 to 400 ms a call.
 | counting in code, recipe resume, fingerprints | **41/41** | 0 | 4.63 s | 222.8 s | 202 | 354 |
 | after the review fixes, with scan mode | 40/41 | 0 | 4.74 s | 227.9 s | 203 | 356 |
 | after the source rewrite | **41/41** | 0 | 4.64 s | 208.2 s | 203 | 379 |
+| hidden frames dropped, checks split in two | 38/41 | 0 | 4.51 s | 199.4 s | 191 | 353 |
 
 A task or two moves between runs of the same code: live sites and the model's scores near a
-threshold both vary. Read one run's 38 against another's 39 as noise, not progress.
+threshold both vary. Read one run's 38 against another's 39 as noise, not progress. In the last run
+all three misses passed on their own straight afterwards, `webform-fine` three times out of three,
+which is what running three tasks at once does to a slow page.
 
 ## Weak spots
 
