@@ -270,30 +270,46 @@ test("a popup window an agent tab opens is minimized; the user's window never is
   } finally { await chrome.stop(); }
 });
 
-test("attaching leaves the user's tabs as they were: colour scheme, focus, and their own dialogs", async () => {
+test("a tab of the user's own stays out of barq's sight, and keeps its own colour scheme and dialogs", async () => {
   const chrome = await startBrowser({ args: ["--force-dark-mode"] });
   try {
     const host = await AttachedBrowser.connect(chrome.dir);
-    // a tab the user opens while barq is connected: barq sees it, and must leave it as it is
-    // (opened with a bare protocol call: a second automation client would answer dialogs itself)
-    await new Promise((resolve, reject) => {
-      const { port, path } = readActivePort(chrome.dir), ws = new WebSocket(`ws://127.0.0.1:${port}${path}`);
-      ws.onopen = () => ws.send(JSON.stringify({ id: 1, method: "Target.createTarget", params: { url: "data:text/html,<title>later</title>user's later tab" } }));
-      ws.onmessage = () => { ws.close(); resolve(); };
-      ws.onerror = reject;
+    // The user opens a tab while barq is connected, through a bare protocol call of its own: a
+    // second automation client, which is what the user's browser is to barq.
+    const { port, path } = readActivePort(chrome.dir);
+    const ws = new WebSocket(`ws://127.0.0.1:${port}${path}`);
+    await new Promise((resolve, reject) => { ws.onopen = resolve; ws.onerror = reject; });
+    const ask = (id, method, params, sessionId) => new Promise(resolve => {
+      const on = e => { const m = JSON.parse(e.data); if (m.id === id) { ws.removeEventListener("message", on); resolve(m); } };
+      ws.addEventListener("message", on);
+      ws.send(JSON.stringify({ id, method, params, ...(sessionId ? { sessionId } : {}) }));
     });
-    const user = await until(() => host.context.pages().find(p => p.url().includes("later")));
-    assert.ok(user, "barq sees tabs opened after it connected");
-    assert.equal(await user.evaluate(() => matchMedia("(prefers-color-scheme: dark)").matches), true, "no forced light scheme");
-    // a confirm() in the user's tab must wait for the user, not be answered by the automation
-    let open;
-    host.context.on("dialog", d => { open = d; });   // only notes it, like the user looking at it
-    await user.evaluate(() => setTimeout(() => { window.answer = confirm("Discard changes?"); }, 0));
-    await sleep(300);
-    const answered = await Promise.race([user.evaluate(() => "answer" in window), sleep(1000).then(() => "still open")]);
-    assert.equal(answered, "still open");
-    assert.equal(open?.message(), "Discard changes?");
-    await open.dismiss();
+    const { result: made } = await ask(1, "Target.createTarget", { url: "data:text/html,<title>later</title>the user's later tab" });
+    const { result: att } = await ask(2, "Target.attachToTarget", { targetId: made.targetId, flatten: true });
+    const session = att.sessionId;
+
+    await sleep(1000);
+    assert.equal(host.context.pages().find(p => p.url().includes("later")), undefined, "the user's tab is not barq's to see");
+
+    // and because it is not barq's, nothing barq does reaches it: it keeps the dark scheme the
+    // browser was started with, and a confirm() in it waits for the user rather than being answered
+    const dark = await ask(3, "Runtime.evaluate", { expression: `matchMedia("(prefers-color-scheme: dark)").matches`, returnByValue: true }, session);
+    assert.equal(dark.result.result.value, true, "no forced light scheme");
+
+    await ask(4, "Runtime.evaluate", { expression: `setTimeout(() => { window.answer = confirm("Discard changes?"); }, 0)` }, session);
+    await sleep(800);
+    // asking the tab anything now waits as long as the dialog does, which is the point: nobody
+    // answered it for the user
+    const answered = await Promise.race([
+      ask(5, "Runtime.evaluate", { expression: `"answer" in window`, returnByValue: true }, session).then(r => r.result?.result?.value ?? false),
+      sleep(1000).then(() => "still waiting"),
+    ]);
+    assert.equal(answered, "still waiting", "the dialog was answered for the user");
+
+    // let the tab go from the browser, not from inside it: the open confirm() holds its renderer,
+    // so anything asked of that session would wait as long as the dialog does
+    await ask(6, "Target.closeTarget", { targetId: made.targetId });
+    ws.close();
     await host.dispose();
   } finally { await chrome.stop(); }
 });

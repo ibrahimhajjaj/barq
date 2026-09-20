@@ -76,8 +76,8 @@ pays, sends or deletes: ask the user, then call again with `allow_irreversible`)
    Then barq's tabs live in one collapsed group named after your project instead of a separate
    window. Tabs it opens close when it is done, and your tab stays in front.
 
-Tabs that were open before barq connected stay out of its sight: it can't read them, and a tab the
-browser has put to sleep can't stall it.
+Your own tabs stay out of its sight: barq sees only the tabs it opened itself, so it can't read
+yours, can't answer a dialog in one, and a tab the browser has put to sleep can't stall it.
 
 ## Logins
 
