@@ -147,6 +147,10 @@ export function repeatsBlock(seq, k, times) {   // does the last run of k items 
   return true;
 }
 
+// "… , and does …": an "and" followed by the start of another question, not one inside a phrase
+// ("terms and conditions", "black and white").
+const JOINED_CLAUSES = /,?\s+and\s+(?=(?:is|are|does|do|did|has|have|was|were|will|can|should|the|it|there)\b)/i;
+
 // the tools that carry one of the caller's values
 const VALUED = ["type", "select", "upload"];
 // What an action comes down to, for telling one round's action from another's.
@@ -487,9 +491,32 @@ export class Barq {
     return answers.q;
   }
 
-  // A yes/no question about the page in front of us, answered as the probability of yes.
+  // Two clauses joined by "and" are two questions. Asked as one they score near the middle even
+  // when both halves are plainly true (0.21 on a page where the halves scored 0.90 and 0.98), so
+  // they are asked apart, in a single request, and the answer is the weaker of the two.
+  splitQuestion(question) {
+    const parts = String(question).split(JOINED_CLAUSES).map(p => p.trim()).filter(Boolean);
+    if (parts.length !== 2 || parts.some(p => p.length < 15)) return null;
+    const [first, second] = parts;
+    return [/[?.]$/.test(first) ? first : `${first}?`, second[0].toUpperCase() + second.slice(1)];
+  }
+
+  // Yes/no question about the current page -> the probability of yes, and the halves it was
+  // answered in when the question asked about more than one thing.
+  async checkDetailed(question) {
+    const parts = this.splitQuestion(question);
+    if (!parts) return { p_yes: (await this.askPage(question, "noul")).noul };
+
+    await this.settle();
+    const page = await this.snapshot();   // as it stands now
+    const asked = Object.fromEntries(parts.map((q, k) => [`q${k}`, { type: "noul", instructions: `Answer about \`page\`: ${q}` }]));
+    const { answers } = await this.call({ page }, asked);
+    const halves = parts.map((question, k) => ({ question, p_yes: +answers[`q${k}`].noul.toFixed(3) }));
+    return { p_yes: Math.min(...halves.map(h => h.p_yes)), parts: halves };
+  }
+
   async check(question) {
-    return (await this.askPage(question, "noul")).noul;
+    return (await this.checkDetailed(question)).p_yes;
   }
 
   // Which of `options` holds for the page in front of us. Options are a list, or names mapped to what each means.

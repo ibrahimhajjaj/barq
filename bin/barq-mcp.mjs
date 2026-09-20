@@ -118,7 +118,11 @@ server.registerTool("browser_check", {   // a yes/no about the page
   annotations: { readOnlyHint: true, openWorldHint: true },
   description: "Ask a yes/no question about ONE thing on the current page. Returns the probability of yes (≥0.85 reliable yes, ≤0.15 reliable no, in between: look yourself with browser_snapshot). Ask two clauses joined by \"and\" as two calls: a compound question scores near the middle even when both halves are plainly true. For what a page says rather than whether something is so, browser_read with a question is the better tool. It answers \"what does this page contain\", so on a page that keeps its own history (a chat thread, an activity feed, a build log) a question about what is happening *now* can be answered from an older entry: use browser_read there.",
   inputSchema: { question: z.string(), session },
-}, tool(async (b, { question }) => ({ question, p_yes: +(await b.check(question)).toFixed(3) })));
+}, tool(async (b, { question }) => {
+  const { p_yes, parts } = await b.checkDetailed(question);
+  // a question about two things is answered in halves, and the weaker half is the answer
+  return { question, p_yes: +p_yes.toFixed(3), ...(parts ? { parts } : {}) };
+}));
 
 server.registerTool("browser_choose", {   // which of several things holds
   title: "Choose about page",
