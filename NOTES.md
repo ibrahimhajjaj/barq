@@ -158,6 +158,11 @@ try after an error, and a full stop at a captcha or "unusual traffic" page, beca
 answer there is a person, not a workaround. The MCP tool runs it in the background and hands back
 counts and a sample, never the pages.
 
+Where those tabs sit doesn't cost speed: a tab in the collapsed group runs timers as fast as one
+in front of its own window (measured: 10 chained 50 ms timers took 509 ms grouped, 511 ms in its
+own window), because barq tells its own tabs they have focus, which is what browsers throttle on.
+So the lever for a faster scan is the number of tabs, not the window they live in.
+
 ## What still breaks
 
 - Judging many values at once (is this table sorted?). Jev reads a state; it doesn't compare a
