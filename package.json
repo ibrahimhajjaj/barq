@@ -51,7 +51,7 @@
     ".env.example"
   ],
   "scripts": {
-    "test": "node --test --test-concurrency=1 test/*.test.mjs",
+    "test": "node --test --test-concurrency=1 --test-timeout=180000 test/*.test.mjs",
     "test:e2e": "node ./test/mcp.e2e.mjs",
     "bench": "node ./bench/run.mjs",
     "bench:cost": "node ./bench/context-cost.mjs",
