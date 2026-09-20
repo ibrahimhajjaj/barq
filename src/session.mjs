@@ -363,6 +363,33 @@ export class Barq {
     return this.frameIds.get(f);
   }
 
+  // Whether the page actually shows a frame. Elements inside an iframe lay out in their own
+  // document whatever the parent does with it, so a menu the user has closed, a zero-sized shell or
+  // a panel parked off the side of the page would otherwise pour its contents into every snapshot:
+  // on a signed-in Google page that is a 44-entry app grid nobody can see or click.
+  async frameIsShown(frame) {
+    const holder = await frame.frameElement().catch(() => null);
+    if (!holder) return false;
+    try {
+      return await holder.evaluate(el => {
+        const r = el.getBoundingClientRect();   // its box on screen
+        if (Math.min(r.width, r.height) < 1) return false;
+        const style = getComputedStyle(el);
+        if (style.visibility === "hidden" || style.display === "none" || +style.opacity <= 0.05) return false;
+        // off the side or above the page rather than merely further down it, which scrolling reaches
+        const page = el.ownerDocument.documentElement;
+        if (!(r.right > 0 && r.bottom > 0 && r.left < page.scrollWidth && r.top < page.scrollHeight)) return false;
+        // an ancestor can clip it away without touching its own box, so hit-test the middle where
+        // that can be done; a frame further down the page has no point to test and is kept
+        const x = r.left + r.width / 2, y = r.top + r.height / 2;
+        if (x < 0 || y < 0 || x >= innerWidth || y >= innerHeight) return true;
+        // a hit-test that lands on an ancestor means the frame itself isn't there to be hit
+        const onTop = el.ownerDocument.elementFromPoint(x, y);
+        return onTop === el || el.contains(onTop);
+      });
+    } catch { return false; } finally { await holder.dispose().catch(() => {}); }
+  }
+
   async snapshot() {
     const main = this.page.mainFrame();   // the top document; frames are read after it
     const rest = this.page.frames().filter(f => f !== main && !f.isDetached());
@@ -372,7 +399,11 @@ export class Barq {
 
     // The main frame first, so its elements keep the low numbers; every frame continues the count
     // where the last one left off, which is what makes one number mean one element page-wide.
+    const shown = await Promise.all(rest.map(f => this.frameIsShown(f).catch(() => false)));
+    const worth = new Set(rest.filter((_, k) => shown[k]));
+
     for (const frame of [main, ...rest]) {
+      if (frame !== main && !worth.has(frame)) continue;
       let listed;
       try { listed = await frame.evaluate(ENUMERATE, { start, frame: this.frameId(frame) || undefined }); } catch { continue; }
       if (frame === main) top = listed;
