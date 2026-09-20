@@ -115,11 +115,14 @@ export async function startRelay(upstream, { idleMs = IDLE_MS, onExit = () => {}
     const c = { ws, root: null, tabs: new Set(), hidden: new Set() };
     clients.add(c); idle();
     log(`client connected (${clients.size} now)`);
-    // The tabs open before a client came (the user's, another client's) stay out of its sight: it
-    // never needs them, reading them isn't its business, and one the browser has put to sleep
-    // would hold up its startup, which sets up every tab it's shown.
-    const ready = call("Target.getTargets")
-      .then(r => { for (const t of r.targetInfos) if (t.type === "page" || t.type === "background_page") c.hidden.add(t.targetId); })
+    // Everything open before a client came (the user's tabs, another client's) stays out of its
+    // sight: it never needs any of it, reading it isn't its business, and one thing the browser has
+    // put to sleep would hold up its startup, which sets up everything it is shown. The empty
+    // filter asks for every kind of target, not the handful Target.getTargets answers with by
+    // default: a browser in use has service workers, shared workers, out-of-process frames and a
+    // tab target per tab, and an attach waits on those too.
+    const ready = call("Target.getTargets", { filter: [{}] })
+      .then(r => { for (const t of r.targetInfos) if (t.type !== "browser") c.hidden.add(t.targetId); })
       .then(() => call("Target.attachToBrowserTarget")).then(r => { c.root = r.sessionId; owner.set(c.root, c); });
     ready.catch(() => ws.close());
     ws.on("message", async data => {
