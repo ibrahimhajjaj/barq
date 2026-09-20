@@ -66,14 +66,26 @@ export async function startRelay(upstream, { idleMs = IDLE_MS, onExit = () => {}
   };
   const idle = () => { clearTimeout(idleTimer); if (!closed && !clients.size) idleTimer = setTimeout(() => close(`no client for ${Math.round(idleMs / 60_000)} min`), idleMs); };
 
-  up.on("message", data => {
-    let msg; try { msg = JSON.parse(data); } catch { return; }
+  up.on("message", data => { let msg; try { msg = JSON.parse(data); } catch { return; } fromBrowser(msg); });
+
+  // Everything the browser says, on its way to the client it belongs to. Called again for an
+  // announcement that was held back until the call that caused it had answered.
+  function fromBrowser(msg) {
     if (msg.id != null) {
       const p = pending.get(msg.id); if (!p) return;
       pending.delete(msg.id);
       if (p.resolve) return msg.error ? p.reject(new Error(msg.error.message)) : p.resolve(msg.result);
       if (msg.result?.sessionId && /^Target\.attachTo/.test(p.method)) owner.set(msg.result.sessionId, p.client);
-      if (msg.result?.targetId && p.method === "Target.createTarget") p.client.tabs.add(msg.result.targetId);
+      if (p.method === "Target.createTarget") {
+        if (msg.result?.targetId) p.client.tabs.add(msg.result.targetId);
+        // the browser announces a new tab before it answers the call that asked for it, so any
+        // announcement held back in the meantime is judged again now that the id is known
+        if (p.client.creating > 0) p.client.creating--;
+        // the announcement goes first: a client that hears about its tab only after the call has
+        // answered has nothing to attach the answer to
+        for (const ev of p.client.held.splice(0)) fromBrowser(ev);
+        return deliver(p.client, { ...msg, id: p.id });
+      }
       if (p.method === "Target.getTargets" && Array.isArray(msg.result?.targetInfos)) msg = { ...msg, result: { ...msg.result, targetInfos: msg.result.targetInfos.filter(t => !p.client.hidden.has(t.targetId)) } };
       return deliver(p.client, { ...msg, id: p.id });
     }
@@ -81,12 +93,28 @@ export async function startRelay(upstream, { idleMs = IDLE_MS, onExit = () => {}
     if (!c) return;
     // sessions opened for a client (its tabs, their frames and workers) are that client's
     const hid = msg.params?.targetInfo?.targetId ?? msg.params?.targetId;
-    if (msg.sessionId === c.root && c.hidden.has(hid)) {
-      // attached by the client's auto-attach: let it run on and let go of it, unseen
+    // What a client may see at the top of the browser is exactly what it opened. A list of the
+    // targets that were there when it connected is not enough: a tab the browser has put to sleep
+    // has no page inside it until something attaches, so its page arrives later with an id no
+    // snapshot could hold, and the client then sits waiting on a page that is frozen. Anything else
+    // announced on the browser session is let go of unseen; sessions inside the client's own tabs
+    // (their frames and workers) go through untouched.
+    const announced = msg.params?.targetInfo;
+    // The browser announces a target to a client only when the client opened it, asked for it by
+    // name (the helper extension's worker), or it is the browser itself. Anything else at the top
+    // of the browser is the user's, including the page a frozen tab grows when something attaches
+    // to it, which is the one that arrives too late for any list made when the client connected.
+    // Sessions inside the client's own tabs, their frames and workers, are left alone.
+    // an extension's own worker belongs to no tab and is how the helper extension is reached
+    const fromExtension = announced?.url?.startsWith("chrome-extension://");
+    const mine = msg.sessionId !== c.root || announced?.type === "browser" || fromExtension
+      || c.tabs.has(hid) || c.tabs.has(announced?.openerId) || c.asked.has(hid);
+    if (msg.method === "Target.attachedToTarget" && !mine && c.creating > 0 && !c.hidden.has(hid)) return void c.held.push(msg);
+    if (c.hidden.has(hid) || (msg.method === "Target.attachedToTarget" && !mine)) {
       if (msg.method === "Target.attachedToTarget") {
         const sid = msg.params.sessionId;
         if (msg.params.waitingForDebugger) send({ id: nextId++, method: "Runtime.runIfWaitingForDebugger", sessionId: sid });
-        send({ id: nextId++, method: "Target.detachFromTarget", params: { sessionId: sid }, sessionId: c.root });
+        send({ id: nextId++, method: "Target.detachFromTarget", params: { sessionId: sid }, sessionId: msg.sessionId });
       }
       if (msg.method === "Target.targetDestroyed") c.hidden.delete(hid);
       return;
@@ -100,7 +128,7 @@ export async function startRelay(upstream, { idleMs = IDLE_MS, onExit = () => {}
     if (msg.method === "Target.targetDestroyed") c.tabs.delete(msg.params.targetId);
     deliver(c, msg);
     if (msg.method === "Target.detachedFromTarget") owner.delete(msg.params.sessionId);
-  });
+  }
 
   const server = http.createServer((req, res) => { res.writeHead(404).end(); });
   const wss = new WebSocketServer({ noServer: true, perMessageDeflate: false, maxPayload: MAX_MESSAGE });
@@ -112,7 +140,7 @@ export async function startRelay(upstream, { idleMs = IDLE_MS, onExit = () => {}
   });
 
   function serve(ws) {
-    const c = { ws, root: null, tabs: new Set(), hidden: new Set() };
+    const c = { ws, root: null, tabs: new Set(), hidden: new Set(), asked: new Set(), creating: 0, held: [] };
     clients.add(c); idle();
     log(`client connected (${clients.size} now)`);
     // Everything open before a client came (the user's tabs, another client's) stays out of its
@@ -122,7 +150,7 @@ export async function startRelay(upstream, { idleMs = IDLE_MS, onExit = () => {}
     // default: a browser in use has service workers, shared workers, out-of-process frames and a
     // tab target per tab, and an attach waits on those too.
     const ready = call("Target.getTargets", { filter: [{}] })
-      .then(r => { for (const t of r.targetInfos) if (t.type !== "browser") c.hidden.add(t.targetId); })
+      .then(r => { for (const t of r.targetInfos) if (["page", "background_page", "tab"].includes(t.type)) c.hidden.add(t.targetId); })
       .then(() => call("Target.attachToBrowserTarget")).then(r => { c.root = r.sessionId; owner.set(c.root, c); });
     ready.catch(() => ws.close());
     ws.on("message", async data => {
@@ -141,6 +169,8 @@ export async function startRelay(upstream, { idleMs = IDLE_MS, onExit = () => {}
         return deliver(c, { id: msg.id, sessionId: msg.sessionId, error: { code: -32000, message: "No target with given id found" } });
       }
       const id = nextId++;
+      if (msg.method === "Target.createTarget") c.creating++;
+      if (msg.method === "Target.attachToTarget" && msg.params?.targetId) c.asked.add(msg.params.targetId);
       pending.set(id, { client: c, id: msg.id, method: msg.method });
       send({ ...msg, id, sessionId });
     });
