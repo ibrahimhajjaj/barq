@@ -115,6 +115,9 @@ export const ENUMERATE = ({ start, frame }) => {   // start: the first number to
     || `${el.name || ""} ${el.id || ""}`.toLowerCase().split(/[^a-z0-9]+/).some(word => SECRET_WORDS.includes(word));
 
   const describeField = (el, o, { tag, type, hit }) => {
+    // a contenteditable often carries no role at all, and an empty one has no value to go by, so
+    // say plainly that text can be typed into it
+    if (el.isContentEditable) o.editable = true;
     const label = labelOf(el);
     if (label) o.label = label;
     const placeholder = el.getAttribute("placeholder");
@@ -261,7 +264,7 @@ export const ENUMERATE = ({ start, frame }) => {   // start: the first number to
     const isField = el.isContentEditable || ["input", "select", "textarea"].includes(tag) || ["textbox", "searchbox", "combobox"].includes(role);
     if (isField) describeField(el, o, { tag, type, hit });
     else describeControl(el, o, tag);
-    describeState(el, o);
+    describeState(el, o, { tag, role });
 
     const own = [o.text, o.label, o.placeholder].find(Boolean) ?? "";
     if (own.length < 16 || isField) describeSurroundings(hit, o, own);

@@ -4,7 +4,7 @@ const TYPED_INPUT = /^(input:(text|email|password|search|tel|url|number|date|dat
 const TYPED_ROLE = /\[(textbox|searchbox|combobox)\]/;
 
 // Something text can be typed into: a real field, an ARIA one, or an editable div carrying a value.
-export const FIELDISH = e => !!e && (TYPED_INPUT.test(e.tag) || TYPED_ROLE.test(e.tag) || (e.tag.startsWith("div[") && e.value !== undefined));
+export const FIELDISH = e => !!e && (e.editable === true || TYPED_INPUT.test(e.tag) || TYPED_ROLE.test(e.tag) || (e.tag.startsWith("div[") && e.value !== undefined));
 export const SELECTISH = e => Boolean(e) && (e.tag === "select" || Boolean(e.options));
 export const FILEISH = e => e?.tag === "input:file";
 
@@ -127,7 +127,7 @@ export function repeatedElements(elements) {   // controls that come many times 
 }
 
 const NAMES_SHOWN = ["label", "text", "placeholder", "name"];
-const FLAGS_SHOWN = ["checked", "filled", "disabled", "busy", "expanded", "active", "hidden", "covered"];
+const FLAGS_SHOWN = ["checked", "filled", "editable", "disabled", "busy", "expanded", "active", "hidden", "covered"];
 const OPTIONS_SHOWN = 8;
 
 function elementLine(e) {
