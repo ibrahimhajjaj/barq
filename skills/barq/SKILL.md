@@ -20,7 +20,9 @@ need to read page dumps unless a step hands control back to you.
    picks which value goes where.
 4. Get information with `browser_read` and a `question`: it returns just the passages that answer
    it, from the whole page. Without a question it returns the page text a page at a time.
-5. Confirm side effects with `browser_check` (a yes/no probability) before moving on.
+5. Confirm side effects with `browser_check` (a yes/no probability) before moving on. One thing per
+   question: "is X on, and does Y say Z" lands near 0.5 even when both halves are true, so ask it as
+   two checks. ≥0.85 is a reliable yes, ≤0.15 a reliable no, and the middle means look for yourself.
 
 ## Many pages
 
