@@ -106,7 +106,9 @@ export class SessionPool {
   // Make sure the session has a live tab; returns true if one had to be replaced.
   async ensure(s) {
     const host = await this.browser();
-    if (s.jb && s.host === host && !s.jb.page.isClosed() && !s.jb.crashed) return false;
+    // a tab can die quietly (a crashed renderer doesn't always say so): ask it something before
+    // handing it to the next call
+    if (s.jb && s.host === host && await this.responsive(s)) return false;
     const replacing = s.hadTab;
     await this.discard(s);
     const page = await host.newTab({ session: s.name });

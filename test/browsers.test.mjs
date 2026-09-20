@@ -10,6 +10,7 @@ import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { chromium } from "playwright";
+import { WebSocket } from "ws";   // node 20 has no global one
 import { findEndpoint, userDataDir, inspectPage, readActivePort, projectLabel, browserConfig, AttachedBrowser, HELPER_EXTENSION_ID, HELPER_VERSION } from "../src/browsers.mjs";
 import { Barq } from "../src/session.mjs";
 
