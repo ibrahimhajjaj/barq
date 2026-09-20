@@ -161,7 +161,13 @@ export const ENUMERATE = ({ start, frame }) => {   // start: the first number to
     if (label && label !== text) o.label = label;
   };
 
-  const describeState = (el, o) => {
+  // A custom element's attributes and classes mean whatever its app decided; aria-pressed and the
+  // rest are standard. So a class is only read as "this one is selected" on the ordinary controls
+  // that use it that way, never on a component of the site's own making.
+  const SELECTABLE_TAGS = ["a", "button", "li", "summary", "td", "th"];
+  const SELECTABLE_ROLES = ["tab", "menuitem", "menuitemradio", "option", "link", "button", "treeitem", "radio"];
+
+  const describeState = (el, o, { tag, role }) => {
     const href = el.getAttribute("href") ?? "";
     if (href && !/^javascript/.test(href)) {
       try {
@@ -179,8 +185,10 @@ export const ENUMERATE = ({ start, frame }) => {   // start: the first number to
     // A toggle that says it is off has to say so: with the flag left out, "off" and "this control
     // has no such state" look the same, and a question about the off one gets answered yes.
     const pressed = el.getAttribute("aria-pressed") ?? el.getAttribute("aria-selected");
+    const namedByClass = !tag.includes("-") && (SELECTABLE_TAGS.includes(tag) || SELECTABLE_ROLES.includes(role))
+      && /\b(selected|active)\b/.test(classOf(el));
     if (pressed === "true" || pressed === "false") o.active = pressed === "true";
-    else if (el.getAttribute("aria-current") || /\b(selected|active)\b/.test(classOf(el))) o.active = true;
+    else if (el.getAttribute("aria-current") || namedByClass) o.active = true;
   };
 
   // Icon-only, generically named and field controls only make sense with the text around them.
