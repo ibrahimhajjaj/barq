@@ -13,6 +13,8 @@ export const ENUMERATE = ({ start, frame }) => {   // start: the first number to
   ].join(", ");
   const TICKABLE = ["checkbox", "radio"];
   const ROW_STATE = /\b(completed|done|selected|active|checked|disabled|error|expanded)\b/i;
+  // How much of a field's contents travels with the page model.
+  const VALUE_SHOWN = 120;
   const SECRET_WORDS = ["pass", "passwd", "password", "pin", "otp", "cvv", "cvc", "csc", "cardnumber", "ccnumber"];
 
   const tidy = (s, max = 80) => (s || "").replace(/\s+/g, " ").trim().slice(0, max);
@@ -133,7 +135,12 @@ export const ENUMERATE = ({ start, frame }) => {   // start: the first number to
     } else {
       const typed = el.isContentEditable && tag !== "input" ? el.innerText : el.value;
       if (isSecret(el, type)) { if (typed) o.filled = true; }
-      else if (typed) o.value = tidy(typed, 60);
+      else if (typed) {
+        o.value = tidy(typed, VALUE_SHOWN);
+        // a field holding an essay is a different thing from one holding a word, and the first
+        // sentence alone doesn't say which: say how much is in there when it doesn't all fit
+        if (typed.length > VALUE_SHOWN) o.value_chars = typed.length;
+      }
     }
 
     const listId = el.getAttribute("list");
@@ -166,8 +173,11 @@ export const ENUMERATE = ({ start, frame }) => {   // start: the first number to
     if (sort && sort !== "none") o.sorted = /asc|up/i.test(sort) ? "ascending" : /desc|down/i.test(sort) ? "descending" : sort;
     if (el.getAttribute("aria-expanded") !== null) o.expanded = el.getAttribute("aria-expanded") === "true";
     if (el.getAttribute("aria-checked")) o.checked = ["true"].includes(el.getAttribute("aria-checked"));
-    if (el.getAttribute("aria-selected") === "true" || el.getAttribute("aria-current")
-      || el.getAttribute("aria-pressed") === "true" || /\b(selected|active)\b/.test(classOf(el))) o.active = true;
+    // A toggle that says it is off has to say so: with the flag left out, "off" and "this control
+    // has no such state" look the same, and a question about the off one gets answered yes.
+    const pressed = el.getAttribute("aria-pressed") ?? el.getAttribute("aria-selected");
+    if (pressed === "true" || pressed === "false") o.active = pressed === "true";
+    else if (el.getAttribute("aria-current") || /\b(selected|active)\b/.test(classOf(el))) o.active = true;
   };
 
   // Icon-only, generically named and field controls only make sense with the text around them.

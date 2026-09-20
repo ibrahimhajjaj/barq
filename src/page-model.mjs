@@ -134,6 +134,7 @@ function elementLine(e) {
   const said = [];
   for (const key of NAMES_SHOWN) if (e[key]) said.push(key === "text" ? `"${e[key]}"` : `${key}="${e[key]}"`);
   if (e.value !== undefined && e.value !== "") said.push(`value="${e.value}"`);
+  if (e.value_chars) said.push(`value_chars=${e.value_chars}`);
   if (e.options) said.push(`options=[${e.options.slice(0, OPTIONS_SHOWN).join(", ")}${e.options.length > OPTIONS_SHOWN ? ", …" : ""}]`);
   if (e.option_count !== undefined) said.push(`option_count=${e.option_count}`);
   for (const flag of FLAGS_SHOWN) if (e[flag] !== undefined) said.push(`${flag}=${e[flag]}`);
