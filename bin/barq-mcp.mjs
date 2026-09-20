@@ -50,6 +50,8 @@ async function siteToolNames(b) {
 // Runs fn in the session's tab, stopping it if the client cancels the request. Plain objects come
 // back as JSON with the session name (when not "main") and a note if the tab had to be replaced
 // first; MCP content passes through untouched.
+const BLANK_TAB = "this tab is blank: barq drives the tabs it opens itself and cannot see the ones you already have open, so send it to the page with browser_open first";
+
 function tool(fn, timeoutMs = 60_000) {
   return async (args, extra) => {
     try {
@@ -139,7 +141,10 @@ server.registerTool("browser_snapshot", {   // the page as numbered elements
   annotations: { readOnlyHint: true, openWorldHint: true },
   description: "The current page, short: the text on screen and every control, numbered. For taking over when browser_do comes back ambiguous or stuck; act on the numbers with browser_act.",
   inputSchema: { session },
-}, tool(b => b.snapshotText()));
+}, tool(async b => {
+  const page = await b.snapshotText();
+  return b.onBlankTab() ? `${page}\n\n${BLANK_TAB}` : page;
+}));
 
 server.registerTool("browser_read", {   // what the page says
   title: "Read page",
@@ -157,7 +162,11 @@ server.registerTool("browser_read", {   // what the page says
     all_regions: z.boolean().optional(),
     session,
   },
-}, tool((b, { question, offset, max_chars, all_regions }) => b.read({ question, offset: offset ?? 0, maxChars: max_chars ?? 12_000, allRegions: !!all_regions })));
+}, tool(async (b, { question, offset, max_chars, all_regions }) => {
+  const out = await b.read({ question, offset: offset ?? 0, maxChars: max_chars ?? 12_000, allRegions: !!all_regions });
+  if (b.onBlankTab()) out.info = BLANK_TAB;
+  return out;
+}));
 
 server.registerTool("browser_site_tools", {
   title: "Site's own tools",

@@ -434,6 +434,13 @@ export class Barq {
     return page;
   }
 
+  // barq works in the tabs it opens and cannot see the ones the user already has, so a caller that
+  // expected to find the page in front of them finds a blank tab instead. Worth saying out loud.
+  onBlankTab() {
+    const url = this.page.url();
+    return !url || url === "about:blank";
+  }
+
   async snapshotText() { await this.settle(); const listed = await this.snapshot(); this.shown = listed; return formatPage(listed); }
 
   // The tools the current tab's site offers through WebMCP. The protocol session is opened on
