@@ -65,7 +65,7 @@ test("the caller can cancel a call", async () => {
 test("a crashed tab is replaced", async () => {
   await pool.run("crash", jb => jb.open(`${base}/crash`));
   // Page.crash never answers: the renderer is gone before it could
-  await pool.run("crash", async jb => { const s = await jb.context.newCDPSession(jb.page); s.send("Page.crash").catch(() => {}); await sleep(500); });
+  await pool.run("crash", async jb => { const s = await jb.context.newCDPSession(jb.page); s.send("Page.crash").catch(() => {}); await sleep(1500); });
   const { result, recovered } = await pool.run("crash", jb => jb.page.url());
   assert.equal(result, `${base}/crash`);
   assert.equal(recovered, true);

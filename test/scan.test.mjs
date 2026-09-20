@@ -44,7 +44,7 @@ before(async () => {
   browser = await chromium.launch({ headless: true });
   context = await browser.newContext();
 });
-after(async () => { await browser.close(); server.closeAllConnections(); server.close(); rmSync(dir, { recursive: true, force: true }); });
+after(async () => { await browser.close(); server.closeAllConnections(); server.close(); rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 }); });
 
 const lines = f => readFileSync(f, "utf8").trim().split("\n").map(l => JSON.parse(l));
 

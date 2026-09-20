@@ -47,7 +47,7 @@ test("findEndpoint reads DevToolsActivePort and ignores a stale one", async () =
   await assert.rejects(findEndpoint(dir), /remote debugging/);
   await assert.rejects(findEndpoint("netscape"), /Unknown browser/);
   assert.equal((await findEndpoint("ws://127.0.0.1:1/devtools/browser/x")).ws, "ws://127.0.0.1:1/devtools/browser/x");
-  rmSync(dir, { recursive: true, force: true });
+  rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
 });
 
 // A running browser with remote debugging on, as the user would have it.
@@ -65,7 +65,7 @@ async function startBrowser({ extension = false, args: extra = [] } = {}) {
     // A hung browser must not leave the test runner waiting forever on cleanup.
     const timer = setTimeout(() => proc.kill("SIGKILL"), 2000);
     try { await exited; } finally { clearTimeout(timer); }
-    rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+    rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
   };
   return { dir, proc, alive: () => proc.exitCode === null && !proc.killed, stop };
 }
