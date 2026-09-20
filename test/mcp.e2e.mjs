@@ -85,7 +85,14 @@ assert.equal(progress.status, "finished");
 assert.equal(progress.summary.done, 2);
 assert.equal(readFileSync(scan.file, "utf8").trim().split("\n").length, 2, "one line per page");
 
-await call("browser_close", { all: true });
+// a name nobody opened is a slip, not an empty cleanup: it says so and lists what is open
+const slip = await client.callTool({ name: "browser_close", arguments: { session: "all-of-them" } });
+assert.ok(slip.isError, "closing an unknown session should be an error");
+assert.match(slip.content[0].text, /no session named "all-of-them".*main.*side/s);
+
+// "all" as the session name means every session, the way the description says
+await call("browser_close", { session: "all" });
+assert.deepEqual((await call("browser_sessions")).sessions, [], "nothing is left open");
 console.log("\nMCP e2e passed. Text returned to the client (chars):", replyChars);
 } finally {
   await client.close();

@@ -66,7 +66,8 @@ never shown to the decision model or returned:
 
 Every tool takes an optional `session` name. Each session is its own tab. Calls on different
 sessions run in parallel, calls on one session run in order. Use separate sessions for
-independent tasks; `browser_sessions` lists them and `browser_close` closes one (or `all`).
+independent tasks; `browser_sessions` lists them, `browser_close` with a `session` closes that
+one, and `browser_close` with `all: true` closes every session and lets go of the browser.
 
 ## In the user's own browser
 

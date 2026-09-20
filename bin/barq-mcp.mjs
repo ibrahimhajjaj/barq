@@ -257,12 +257,21 @@ server.registerTool("browser_sessions", {
 
 server.registerTool("browser_close", {   // one session, or all of them
   title: "Close session",
-  description: "Close a session's tab (default \"main\"), or every session and the browser connection with all=true. The next call on a closed session starts a fresh tab.",
+  description: "Close a session's tab (default \"main\"), or every session and the browser connection with all=true (session:\"all\" does the same). The next call on a closed session starts a fresh tab.",
   inputSchema: { session, all: z.boolean().optional() },
 }, async ({ session: name, all }) => {
   try {
-    if (all) { await pool.closeAll(); return text({ closed: "all" }); }
-    return text({ closed: await pool.close(name ?? "main") });
+    const open = pool.list().map(s => s.session);
+    // "all" as the session name is the mistake this tool invites, so take it as meaning all of them
+    if (all || (name === "all" && !open.includes("all"))) { await pool.closeAll(); return text({ closed: "all" }); }
+    const wanted = name ?? "main";
+    // a name nobody opened is a caller's slip, not an empty cleanup: say so rather than answer false
+    if (!open.includes(wanted)) {
+      return fail(new Error(open.length
+        ? `no session named "${wanted}"; open sessions: ${open.join(", ")} (all=true closes every one)`
+        : `no session named "${wanted}"; nothing is open`));
+    }
+    return text({ closed: await pool.close(wanted) });
   } catch (e) { return fail(e); }
 });
 
