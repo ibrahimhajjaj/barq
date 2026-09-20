@@ -231,9 +231,9 @@ export class AttachedBrowser {
     const sw = await this.helper();
     if (sw) {
       try {
-        const title = session === "main" ? this.group.title : `${this.group.title} · ${session}`;
-        // groups are this connection's own: another agent's "main" session gets a group of its own
-        const { tabId } = await sw.evaluate(args => self.jevGroup(args), { marker: this.markers.get(page), session: `${this.owner}:${session}`, ...this.group, title });
+        // one group per connection, named after the project: every session of this agent keeps its
+        // tab there, and another agent working in the same project gets a group of its own
+        const { tabId } = await sw.evaluate(args => self.jevGroup(args), { marker: this.markers.get(page), session: this.owner, ...this.group });
         (this.tabIds ??= new WeakMap()).set(page, tabId);
         return page;
       } catch (e) {

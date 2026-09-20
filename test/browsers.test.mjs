@@ -126,9 +126,10 @@ test("attached: tabs go in a group, a popup joins it and the user keeps their ta
     assert.equal(group.title, "Agent");
     assert.equal(group.collapsed, true);
 
+    // a second session of the same agent joins the same group, it doesn't start another
     const other = await host.newTab({ session: "research" });
-    const titles = await sw.evaluate(() => chrome.tabGroups.query({}).then(gs => gs.map(g => g.title).sort()));
-    assert.deepEqual(titles, ["Agent", "Agent · research"]);
+    const groups = await sw.evaluate(() => chrome.tabGroups.query({}).then(gs => Promise.all(gs.map(async g => ({ title: g.title, tabs: (await chrome.tabs.query({ groupId: g.id })).length })))));
+    assert.deepEqual(groups, [{ title: "Agent", tabs: 3 }]);
     await other.close();
 
     await jb.close();
