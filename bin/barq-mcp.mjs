@@ -54,16 +54,23 @@ const BLANK_TAB = "this tab is blank: barq drives the tabs it opens itself and c
 
 function tool(fn, timeoutMs = 60_000) {
   return async (args, extra) => {
+    let session;
     try {
       const name = args.session ?? "main";
       const limit = typeof timeoutMs === "function" ? timeoutMs(args) : timeoutMs;
-      const { result, recovered } = await pool.run(name, jb => fn(jb, args), { timeoutMs: limit, signal: extra?.signal });
+      const { result, recovered } = await pool.run(name, jb => { session = jb; return fn(jb, args); }, { timeoutMs: limit, signal: extra?.signal });
       if (result?.content) return result;
       if (!result || typeof result !== "object") return text(recovered ? `(${RECOVERED})\n${result}` : String(result));
       if (name !== "main") result.session = name;
       if (recovered) result.recovered = RECOVERED;
+      if (session?.onBlankTab() && !result.info) result.info = BLANK_TAB;
       return text(result);
-    } catch (e) { return fail(e); }
+    } catch (e) {
+      // acting on an element number from another page fails in a way that reads like a missing
+      // feature, so a blank tab says what it is before the caller goes looking for the bug
+      if (session?.onBlankTab()) return fail(new Error(`${String(e?.message ?? e).split("\n")[0]} (${BLANK_TAB})`));
+      return fail(e);
+    }
   };
 }
 
@@ -162,10 +169,8 @@ server.registerTool("browser_read", {   // what the page says
     all_regions: z.boolean().optional(),
     session,
   },
-}, tool(async (b, { question, offset, max_chars, all_regions }) => {
-  const out = await b.read({ question, offset: offset ?? 0, maxChars: max_chars ?? 12_000, allRegions: !!all_regions });
-  if (b.onBlankTab()) out.info = BLANK_TAB;
-  return out;
+}, tool((b, { question, offset, max_chars, all_regions }) => {
+  return b.read({ question, offset: offset ?? 0, maxChars: max_chars ?? 12_000, allRegions: !!all_regions });
 }));
 
 server.registerTool("browser_site_tools", {
