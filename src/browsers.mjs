@@ -123,7 +123,9 @@ export class AttachedBrowser {
 
   static async connect(spec = "auto", { placement = "auto", group = {}, size = { width: 1280, height: 800 }, allowTimeoutMs = 120_000 } = {}) {
     const endpoint = await findEndpoint(spec);
-    const slow = () => new Error(`Connecting to ${endpoint.name} took longer than ${Math.round(allowTimeoutMs / 1000)}s. If it shows an "Allow remote debugging" prompt, click Allow; otherwise one of its tabs may be hung. Then retry.`);
+    // The tabs the user has open can no longer hold this up: a connection is only ever shown the
+    // tabs it opened. So the wait is the browser asking to be allowed, and that is what to say.
+    const slow = () => new Error(`${endpoint.name} has not allowed the connection after ${Math.round(allowTimeoutMs / 1000)}s. Look for an "Allow remote debugging" prompt in ${endpoint.name} and click Allow, then try again. If there is no prompt, turn remote debugging off and on again at ${inspectPage(endpoint.name)}.`);
     // On recent browsers each new connection waits for the user to click "Allow". One approved
     // connection per browser run is shared through a relay process, so a new server (another agent
     // session, a restart) doesn't ask again. Straight to the browser when the relay is off or
