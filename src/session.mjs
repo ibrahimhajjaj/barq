@@ -227,6 +227,7 @@ export class Barq {
     this.frameIds = new WeakMap(); this.nextFrameId = 1;
     this.callSignal = null;          // set by a caller that can time out or cancel the current call
     this.crashed = false;
+    this.progress = null;        // what a step in flight has done, for a caller that gives up first
     this.page = page;
     this.ready = this.adopt(page);
   }
@@ -1232,6 +1233,10 @@ export class Barq {
     let book = recipe && !again ? this.recipes : null;
     const key = book ? recipeKey(goal, this.page.url(), values) : flow?.key, steps = [];
     let saved = null, run = null, plan = null, counting = null, before = 0;
+    // A caller can have a shorter deadline than the step does, and an action that overruns leaves
+    // the step still inside a round when that deadline lands. Everything it has done so far lives
+    // in these arrays, so hand them out rather than let the work vanish into a one-line error.
+    this.progress = { goal, actions: history, rounds, before: 0, startedAt: t0, callsBefore: calls0 };
     try {
     // A goal that counts from what the page has ("load 5 more results") takes that count before
     // it acts, and a replay would already have added to it: such goals neither replay nor record.
@@ -1239,6 +1244,7 @@ export class Barq {
     if (counting?.more) book = flow = null;
     if (flow) history.push(...flow.history);
     before = history.length;
+    this.progress.before = before;
     saved = book?.get(key);
     plan = book ? saved?.steps : flow?.remaining;
     if (Array.isArray(plan) && plan.length) {
@@ -1479,7 +1485,27 @@ export class Barq {
       out.page_text = page?.text?.substring(0, 600);
       if (["ambiguous", "stuck", "max_actions"].includes(status)) out.candidates = last?.candidates;
     }
+    this.progress = null;
     return out;
+  }
+
+  // What the step in flight has done, for a caller whose own time limit ran out first.
+  partialStep() {
+    const p = this.progress;
+    if (!p) return null;
+    const last = p.rounds.at(-1);
+    return {
+      status: "timeout",
+      goal: p.goal,
+      url: this.page.url(),
+      actions: p.actions.slice(p.before),
+      rounds: p.rounds,
+      done_score: +(last?.done ?? 0),
+      ...(last?.candidates ? { candidates: last.candidates } : {}),
+      info: "the caller's time limit ran out while the step was still going; this is what it had done by then",
+      jev_calls: this.stats.calls - p.callsBefore,
+      ms: Date.now() - p.startedAt,
+    };
   }
 
   async showDecision(act, r) {

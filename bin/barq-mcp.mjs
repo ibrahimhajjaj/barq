@@ -50,6 +50,18 @@ async function siteToolNames(b) {
 // Runs fn in the session's tab, stopping it if the client cancels the request. Plain objects come
 // back as JSON with the session name (when not "main") and a note if the tab had to be replaced
 // first; MCP content passes through untouched.
+// One shape for a step's result, whether the step finished or a caller's deadline cut it short.
+function stepEnvelope(r, { trace, explain, name } = {}) {
+  const actions = (r.actions ?? []).map(h => h.event ? `(event) ${h.event}`
+    : `${h.action}${h.key ? ` ${h.key}` : ""} ${h.element ?? ""}${h.value ? ` <- values.${h.value}` : ""}${h.option ? ` <- "${h.option}"` : ""}${h.destination ? ` -> ${h.destination}` : ""}${h.error ? `  ERROR: ${h.error}` : ""}`.trim());
+  const { status, url, title, done_score, jev_calls, ms } = r; const out = { status, url, title, actions, done_score, jev_calls, ms };
+  for (const k of ["info", "pending", "accounts", "recipe", "page_text", "candidates"]) if (r[k]) out[k] = r[k];
+  if (explain && r.rounds) out.rounds = r.rounds.map(({ candidates, ...x }) => x);
+  if (trace) out.trace = trace;
+  if (name && name !== "main") out.session = name;
+  return out;
+}
+
 const BLANK_TAB = "this tab is blank: barq drives the tabs it opens itself and cannot see the ones you already have open, so send it to the page with browser_open first";
 
 function tool(fn, timeoutMs = 60_000) {
@@ -66,6 +78,13 @@ function tool(fn, timeoutMs = 60_000) {
       if (session?.onBlankTab() && !result.info) result.info = BLANK_TAB;
       return text(result);
     } catch (e) {
+      // a step cut short by this caller's own deadline still says what it did, and writes the same
+      // trace a finished one would: "gave up after 120s" on its own is not something anyone can act on
+      const partial = session?.partialStep?.();
+      if (partial) {
+        const trace = traces.write("do", { ...partial, timed_out: true }, { session: args.session ?? "main" });
+        return text(stepEnvelope({ ...partial, title: undefined }, { trace, explain: true, name: args.session }));
+      }
       // acting on an element number from another page fails in a way that reads like a missing
       // feature, so a blank tab says what it is before the caller goes looking for the bug
       if (session?.onBlankTab()) return fail(new Error(`${String(e?.message ?? e).split("\n")[0]} (${BLANK_TAB})`));
@@ -113,10 +132,7 @@ server.registerTool("browser_do", {   // one outcome, Jev choosing each action
 }, tool(async (b, { goal, values, max_actions, timeout_s, allow_irreversible, explain, recipe, session: name }) => {
   const r = await b.do(goal, { values: values ?? {}, maxActions: max_actions ?? 10, timeoutMs: (timeout_s ?? 90) * 1000, allowIrreversible: !!allow_irreversible, log: stderrLog, recipe: recipe !== false });
   const trace = traces.write("do", { ...r, values: Object.keys(values ?? {}), model: b.stats.model }, { session: name ?? "main", values });
-  const actions = r.actions.map(h => h.event ? `(event) ${h.event}` : [h.action, h.key, h.element, h.value && `<- values.${h.value}`, h.option && `<- "${h.option}"`, h.destination && `-> ${h.destination}`, h.error && `ERROR: ${h.error}`].filter(Boolean).join(" "));
-  const { status, url, title, done_score, jev_calls, ms } = r; const out = { status, url, title, actions, done_score, jev_calls, ms };
-  for (const k of ["info", "pending", "accounts", "recipe", "page_text", "candidates"]) if (r[k]) out[k] = r[k];
-  if (explain) out.rounds = r.rounds.map(({ candidates, ...round }) => round);
+  const out = stepEnvelope(r, { explain });
   if (trace) out.trace = trace;
   Object.assign(out, await siteToolNames(b));
   return out;
