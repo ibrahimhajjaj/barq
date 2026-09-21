@@ -73,17 +73,28 @@ export function toText(blocks, { regions } = {}) {
     : b.kind === "li" ? `- ${b.text}` : b.kind === "row" ? `| ${b.text} |` : b.text).join("\n");
 }
 
-// Passages of about `size` characters that never cross a heading; each remembers the heading it
-// sits under so a passage makes sense on its own.
+// Passages of about `size` characters that never cross a heading; each remembers the headings it
+// sits under, innermost last, so a passage makes sense on its own and still says where it came
+// from. Keeping the outer one matters where a box has headings of its own: a search page's "AI
+// Overview" is a heading, and its answer is written under further headings inside it, so with only
+// the nearest heading kept, a machine-written answer arrives looking like any other result.
 export function passages(blocks, { size = 600 } = {}) {
   const out = [];
-  let heading = "", cur = null;
+  const trail = [];
+  let cur = null;
   const flush = () => { if (cur?.text) out.push(cur); cur = null; };
+  const heading = () => trail.filter(Boolean).slice(-2).join(" > ").slice(0, 160);
   for (const b of blocks) {
-    if (/^h\d$/.test(b.kind)) { flush(); heading = b.text.slice(0, 120); continue; }
+    if (/^h\d$/.test(b.kind)) {
+      flush();
+      const level = +b.kind[1];
+      trail.length = level - 1;
+      trail[level - 1] = b.text.slice(0, 120);
+      continue;
+    }
     const line = b.kind === "li" ? `- ${b.text}` : b.kind === "row" ? `| ${b.text} |` : b.text;
     if (cur && cur.text.length + line.length > size) flush();
-    cur ??= { heading, region: b.region, text: "" };
+    cur ??= { heading: heading(), region: b.region, text: "" };
     cur.text += (cur.text ? "\n" : "") + line.slice(0, size * 2);
   }
   flush();

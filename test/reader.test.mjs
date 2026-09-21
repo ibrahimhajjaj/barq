@@ -47,10 +47,12 @@ test("blocks cover the whole page, skip hidden text, and keep headings, lists, r
   assert.doesNotMatch(toText(blocks, { regions: ["main"] }), /Home|Contact/);
 });
 
-test("passages break at headings and carry their heading", () => {
+test("passages break at headings and carry the ones they sit under, outer first", () => {
   const ps = passages(blocks);
   const grow = ps.find(p => p.text.includes("70 countries"));
-  assert.equal(grow.heading, "Growing [edit]");
+  // the section it is in as well as the heading right above it: a box with headings of its own
+  // (a search page's "AI Overview", say) would otherwise hand back text that looks like any other
+  assert.equal(grow.heading, "Coffee guide > Growing [edit]");
   assert.ok(ps.every(p => !/^#/.test(p.text)));
   const long = passages([{ kind: "h2", text: "A" }, ...Array.from({ length: 20 }, () => ({ kind: "p", region: "main", text: "x".repeat(100) }))], { size: 300 });
   assert.ok(long.length >= 6 && long.every(p => p.text.length <= 400));
