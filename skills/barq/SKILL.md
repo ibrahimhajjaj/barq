@@ -25,6 +25,12 @@ need to read page dumps unless a step hands control back to you.
    two checks. ≥0.85 is a reliable yes, ≤0.15 a reliable no, and the middle means look for yourself.
    On a page that keeps its own history (a chat thread, an activity feed, a build log) ask
    `browser_read` instead: a check about what is happening *now* can be answered from an older entry.
+   The same goes for a page whose own components are named for a state: an element called
+   something like `job-processing-card` reads as progress even when the text around it says the
+   work finished, because a name is evidence too.
+   `browser_read` answers from the words on the page, which is what you want in both cases, and it
+   labels each passage with the headings above it, so an answer lifted from a search engine's
+   generated summary ("AI Overview > ...") is distinguishable from one taken off a real result.
 
 ## Many pages
 

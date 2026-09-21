@@ -137,7 +137,9 @@ modals, dialogs, drag and drop, uploads, iframes, shadow DOM, new tabs, pages wi
 and non-English interfaces.
 
 Not good at: judging many values at once ("is this table sorted?") comes back `likely_done` or
-`stuck`, never a false `done`. Counting works, because code counts rather than Jev. Captchas are
+`stuck`, never a false `done`. A page whose own components are named for a state ("processing") can
+also talk a check round, since that name is evidence too; `browser_read` answers from the words
+instead, and tells you which headings a passage sat under. Counting works, because code counts rather than Jev. Captchas are
 reported, never solved. Sites that serve nothing to automated browsers need your own browser.
 
 On the 41-task benchmark: 41/41 correct in the best run, 0 false "done" in every run, about 4.5 s
