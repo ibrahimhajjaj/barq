@@ -120,6 +120,28 @@ export function pageDiff(before, after) {
 const NAME_OF = e => `${e.label ?? ""} ${e.text ?? ""} ${e.placeholder ?? ""} ${e.name ?? ""} ${e.near ?? ""}`.toLowerCase();
 const GOAL_WORDS = goal => [...new Set(String(goal).toLowerCase().match(/[\p{L}\p{N}][\p{L}\p{N}'-]{2,}/gu) ?? [])];
 
+// Which elements a goal is most likely to be about. A page a little over the question's option cap
+// would otherwise have to be asked about in two rounds, which doubles the calls on every one; this
+// keeps the likeliest `keep` of them and hands them back in page order, so the numbering a reader
+// sees still runs down the page.
+export function likelyFor(elements, goal, keep) {
+  if (elements.length <= keep) return elements;
+  const words = GOAL_WORDS(goal);
+  const score = e => {
+    const name = NAME_OF(e);
+    let n = 0;
+    for (const w of words) if (name.includes(w)) n += name.split(/\W+/).includes(w) ? 4 : 2.5;
+    if (FIELDISH(e) || SELECTISH(e)) n += 2;                       // something to fill in is rarely noise
+    if (/^(button|a|input:submit|input:button)/.test(e.tag)) n += 1.5;
+    if (e.active) n += 1;
+    if (e.disabled) n -= 5;
+    if (e.covered || e.hidden) n -= 3;
+    return n;
+  };
+  const ranked = elements.map((e, k) => ({ e, k, n: score(e) })).sort((a, b) => b.n - a.n || a.k - b.k);
+  return ranked.slice(0, keep).sort((a, b) => a.k - b.k).map(x => x.e);
+}
+
 // The words in a goal that could be meant as something to type. Jev cannot write text, but it can
 // pick, so a goal that names what to look for can still fill a search box: quoted text first, then
 // what follows the words people use to introduce a term, then the runs of capitalised words, then
