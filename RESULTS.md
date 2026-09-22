@@ -63,6 +63,25 @@ threshold both vary. Read one run's 38 against another's 39 as noise, not progre
 all three misses passed on their own straight afterwards, `webform-fine` three times out of three,
 which is what running three tasks at once does to a slow page.
 
+## Against the other Jev browser agents
+
+Run on browser-use/jev-ultrafast's own published tasks, with their goal strings, their clock (from
+the first decision to done, initial navigation outside the timer) and their local fixture:
+
+- Their Wikipedia task: **4.79 s** here against **2.798 s** there.
+- Their hotel fixture: **4.22 s** here against **1.896 s** there.
+
+They are faster on a single one-shot task, and their per-decision time is about half ours because
+they send a smaller state. Three things account for most of the difference, and all three are
+deliberate: a final round that verifies rather than assumes, a watch after every action for work a
+page starts late, and a richer page model. What is on the other side of that trade is this file: 41
+tasks on live sites with the truth asserted inside the page, no false "done" in any published run,
+and a recorded run that replays without the model at all.
+
+Their published speed evidence is three alternating pairs of one task, which their own performance
+note calls too few for a statistical claim, plus two single smoke runs. They publish no accuracy
+benchmark.
+
 ## Weak spots
 
 Every task passed in the latest run, but these are the ones that have failed before, and why:
