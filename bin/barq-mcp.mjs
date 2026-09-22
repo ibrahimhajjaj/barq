@@ -103,6 +103,9 @@ server.registerTool("browser_open", {   // go to an address
 }, tool(async (b, { url }) => {
   const r = await b.open(url);
   const page = await b.snapshot();   // as it stands now
+  // a count is not a listing: no element numbers went back to the caller, so acting on one now
+  // would be acting on a number remembered from somewhere else
+  b.shown = null;
   return { ...r, elements: page.elements.length, visible_text: page.text.slice(0, 400), ...await siteToolNames(b) };
 }));
 
@@ -210,6 +213,11 @@ server.registerTool("browser_call_site_tool", {
 }, tool(async (b, { name, input, allow_irreversible, timeout_s }) => (await b.siteTools()).call(name, input ?? {}, { allowIrreversible: !!allow_irreversible, timeoutMs: (timeout_s ?? 30) * 1000 }),
   ({ timeout_s }) => ((timeout_s ?? 30) + 15) * 1000));
 
+// Element numbers belong to a page this session listed. browser_open reports a count, not numbers,
+// so a number used straight after it can only have been remembered from somewhere else, and matching
+// it against whatever is on screen now would act on a different element without saying so.
+const LISTING_FIRST = "element numbers come from browser_snapshot or browser_do, and this session has not listed this page yet: take a snapshot and use the numbers it gives back";
+
 server.registerTool("browser_act", {   // one action on a numbered element
   title: "Act on element",
   annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true },
@@ -224,7 +232,10 @@ server.registerTool("browser_act", {   // one action on a numbered element
     allow_irreversible: z.boolean().optional().describe("Act even if the control pays, sends, posts or deletes; only when the user wants it"),
     session,
   },
-}, tool((b, { accept_dialog, allow_irreversible, session: _, ...args }) => b.actOn({ ...args, acceptDialog: !!accept_dialog, allowIrreversible: !!allow_irreversible })));
+}, tool((b, { accept_dialog, allow_irreversible, session: _, ...args }) => {
+  if (!b.shown && (args.element != null || args.destination != null)) throw new Error(LISTING_FIRST);
+  return b.actOn({ ...args, acceptDialog: !!accept_dialog, allowIrreversible: !!allow_irreversible });
+}));
 
 server.registerTool("browser_screenshot", {   // the page as a picture
   title: "Screenshot",

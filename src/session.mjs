@@ -367,6 +367,7 @@ export class Barq {
       this.request({ page: { url: "about:blank" } }, { q: { type: "noul", instructions: "Answer about `page`: is this page blank?" } }, { retries: 0, timeout: 8000 }).catch(() => {});
     }
     this.breakFlow();
+    this.shown = null;                   // the numbers from the page we are leaving mean nothing here
     this.lastActionAt = t0;
     await this.page.goto(url, { timeout: 30_000, waitUntil: "commit" });
     await this.page.waitForLoadState("domcontentloaded", { timeout: 15_000 }).catch(() => { /* read the page as it is */ });

@@ -186,6 +186,16 @@ test("a dropdown option the goal names outright is chosen without reading the li
   await b2.close();
 });
 
+test("going somewhere else drops the element numbers that belonged to the page left behind", async () => {
+  const b2 = await Barq.launch({ browser });
+  await b2.open("data:text/html,<title>one</title><button>Save</button><button>Remove</button>");
+  await b2.snapshotText();
+  assert.ok(b2.shown, "the page was listed");
+  await b2.open("data:text/html,<title>two</title><button>Other</button>");
+  assert.equal(b2.shown, null, "and the listing went with the page");
+  await b2.close();
+});
+
 test("a tab barq has not been sent anywhere says so", async () => {
   const b2 = await Barq.launch({ browser });
   assert.equal(b2.onBlankTab(), true, "a fresh tab is blank until it is sent somewhere");
