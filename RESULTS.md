@@ -58,6 +58,7 @@ waiting for pages; Jev's own share is 300 to 400 ms a call.
 | hidden frames dropped, checks split in two | 38/41 | 0 | 4.51 s | 199.4 s | 191 | 353 |
 | diagnosable timeouts, passages keep their section | 40/41 | 0 | 4.58 s | 203.6 s | 200 | 329 |
 | the goal's own words as typing, one question per page | **41/41** | 0 | 4.68 s | 203.2 s | 194 | 349 |
+| the page answers for a plain goal, question during settle | **41/41** | 0 | 4.17 s | 184.1 s | 186 | 334 |
 
 A task or two moves between runs of the same code: live sites and the model's scores near a
 threshold both vary. Read one run's 38 against another's 39 as noise, not progress. In the last run
@@ -69,8 +70,11 @@ which is what running three tasks at once does to a slow page.
 Run on browser-use/jev-ultrafast's own published tasks, with their goal strings, their clock (from
 the first decision to done, initial navigation outside the timer) and their local fixture:
 
-- Their Wikipedia task: **4.79 s** here against **2.798 s** there.
-- Their hotel fixture: **4.22 s** here against **1.896 s** there.
+- Their Wikipedia task: **3.42 s** here against **2.798 s** there, three runs, all correct.
+- Their hotel fixture: **4.21 s** here against **1.896 s** there, three runs, all correct.
+
+Both are run from one prompt with nothing supplied: the text to type is chosen out of the goal
+itself, since the decision model cannot write but can pick.
 
 They are faster on a single one-shot task, and their per-decision time is about half ours because
 they send a smaller state. Three things account for most of the difference, and all three are
