@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 import http from "node:http";
 import { chromium } from "playwright";
 import { Barq, repeatsBlock, actionError, estimateTokens, fitState } from "../src/session.mjs";
-import { pageDiff, formatPage, repeatedElements, optionSummary, clipMiddle, numbersIn, mayCount, kindsOf, countKind, phrasesFrom, likelyFor } from "../src/page-model.mjs";
+import { pageDiff, formatPage, repeatedElements, optionSummary, clipMiddle, numbersIn, mayCount, kindsOf, countKind, phrasesFrom, likelyFor, plainGoal, goalMet } from "../src/page-model.mjs";
 
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 
@@ -131,6 +131,28 @@ test("a page a little over the question's cap is trimmed to what the goal is abo
   assert.deepEqual(kept.map(e => e.i), [...kept.map(e => e.i)].sort((a, b) => a - b), "and the order still runs down the page");
   const small = els.slice(0, 10);
   assert.equal(likelyFor(small, "anything", 240), small, "a page under the cap is handed back untouched");
+});
+
+test("a goal that says plainly what it wants is checked against the page, and anything else is not", () => {
+  // what the caller passed in has to show up, all of it
+  const filling = plainGoal("Fill in the form", { first: "Ada", last: "Lovelace" });
+  assert.equal(goalMet(filling, { elements: [{ tag: "input:text", value: "Ada" }] }), null, "one field of two is not filled in");
+  assert.equal(goalMet(filling, { elements: [{ tag: "input:text", value: "Ada" }, { tag: "input:text", value: "Lovelace" }] }), true);
+
+  // a goal with a second thing to do after the typing is not finished by the typing
+  assert.equal(plainGoal("Fill in the checkout information and continue", { name: "Ada" }), null);
+  assert.equal(plainGoal("Add the two todos, then clear the completed ones", {}), null);
+
+  // a secret cannot be read back off the page, so that one is still asked about
+  assert.equal(plainGoal("Type the password", { password: "env:PW" }), null);
+
+  // a choice shows in the control, a tick shows in the box, an address shows in the url
+  assert.equal(goalMet(plainGoal("Choose Two in the dropdown", {}), { elements: [{ tag: "select", options: ["One", "Two"], value: "Two" }] }), true);
+  assert.equal(goalMet(plainGoal("Tick the Remember box", {}), { elements: [{ tag: "input:checkbox", checked: true, label: "Stickers" }] }), null, "a word has to be a word, not part of one");
+  assert.equal(goalMet(plainGoal("Open the page about incompleteness theorems", {}), { url: "https://x.test/wiki/Incompleteness_theorems", title: "", elements: [] }), true);
+
+  // and a goal nobody could check this way says so rather than guessing
+  assert.equal(plainGoal("Make the table sorted by last name", {}), null);
 });
 
 test("a tab barq has not been sent anywhere says so", async () => {
