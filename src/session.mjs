@@ -155,6 +155,14 @@ export function repeatsBlock(seq, k, times) {   // does the last run of k items 
 // ("terms and conditions", "black and white").
 const JOINED_CLAUSES = /,?\s+and\s+(?=(?:is|are|does|do|did|has|have|was|were|will|can|should|the|it|there)\b)/i;
 
+// Actions that leave the page broadly where it was, so an answer asked for while it settles is
+// probably still about the page in front of us when it arrives.
+const GUESSABLE = new Set(["type", "press_key", "hover", "scroll", "wait"]);
+
+// Enough of a page to tell whether the one a question was asked about is still the one in front of
+// us: its address, how much text it holds, and what its controls are called.
+const samePage = page => `${page.url}|${page.text.length}|${page.elements.map(e => brief(e)).join("~")}`;
+
 // the tools that carry one of the caller's values
 const VALUED = ["type", "select", "upload"];
 // What an action comes down to, for telling one round's action from another's.
@@ -577,6 +585,8 @@ export class Barq {
     return questions;
   }
 
+  // Enough of a page to tell whether the one a decision was made on is still the one in front of
+  // us: its address, how much text and how many controls it has, and what they are called.
   async decide(page, goal, values, history, lastChange, count) {
     const jevValues = forJev(values);   // names always, contents only when not secret
     const task = {
@@ -1260,6 +1270,7 @@ export class Barq {
     const t0 = Date.now(), calls0 = this.stats.calls;
     const history = [], rounds = [];
     let prevPage = null, waits = 0, page = null, status = "max_actions", info, pending, accounts, retried = false;
+    let lastTool = null;
     // Typing the goal's own words puts them on the page, which is exactly what a "does this page
     // show the goal achieved" question reads. The round after one of those has to be carried by
     // something other than the echo, so the first such finish is not taken at its word.
@@ -1308,6 +1319,21 @@ export class Barq {
     // confirms a full replay: a replay never claims "done" on its own.
     if (!run?.stop) for (let round = run?.count ?? 0; round <= maxActions; round++) {
       if (this.timeLeft() === 0) { status = "timeout"; info = "the step ran out of time; see actions for what was done"; break; }
+      // A question costs about a third of a second and so does waiting for the page to go quiet.
+      // Taken one after the other that is paid twice, so after an action that rarely replaces the
+      // page the question goes out against the page as it is now, while the waiting carries on.
+      // If the page has moved by the time the answer lands, the answer is about a page that is no
+      // longer there and is thrown away.
+      // Not the first round: straight after a navigation the page is still being put together, so
+      // the guess is thrown away almost every time and only costs a question.
+      const mayGuess = GUESSABLE.has(lastTool) && !counting && round > 0;
+      const early = mayGuess ? await this.snapshot() : null;
+      const earlyPrint = early && samePage(early);
+      const guess = early
+        ? this.decide(early, goal, values, history.slice(-12), prevPage ? pageDiff(prevPage, early) : undefined, undefined)
+        : null;
+      guess?.catch(() => {});
+
       await this.settle();
       page = await this.snapshot();
       for (const event of this.events.splice(0)) history.push({ event });
@@ -1318,7 +1344,11 @@ export class Barq {
         continue;
       }
       if (counting) await this.count(counting, page, goal);
-      const a = await this.decide(page, goal, values, history.slice(-12), round ? pageDiff(prevPage, page) : undefined, counting && this.countProgress(counting));
+      const stillThere = early && samePage(page) === earlyPrint;
+      const a = stillThere
+        ? await guess
+        : await this.decide(page, goal, values, history.slice(-12), round ? pageDiff(prevPage, page) : undefined, counting && this.countProgress(counting));
+      if (stillThere) page = early;
       prevPage = page;
       const act = this.resolve(page, a, values);   // the answers made into something to do
       const r = this.roundRecord(round, a, act, page);
@@ -1345,7 +1375,11 @@ export class Barq {
 
       // the goal's words are on the page because barq typed them there, so this round's "looks
       // done" is not evidence; the next one, after something has actually been acted on, is
-      if (echoedGoal && done >= doneAt) { echoedGoal = false; done = 0; r.echo_ignored = true; }
+      // only the round straight after the echo: by the next one the page has moved on and its
+      // "looks done" is its own again
+      const echo = echoedGoal;
+      echoedGoal = false;
+      if (echo && done >= doneAt) { done = 0; r.echo_ignored = true; }
       if (act.tool !== "none" && round > 0 && done >= doneAt && done < 0.85) {
         // "the goal is met" and "here is the next action" disagree: one stricter question settles it
         r.confirm = await this.looksFinished(page, goal, history);
@@ -1480,6 +1514,7 @@ export class Barq {
         break;
       }
 
+      lastTool = act.tool;
       const h = { action: act.tool, element: brief(act.el ?? null) };
       if (act.tool === "select" && act.value != null) h.option = act.optionGroup ? `${act.value} (${act.optionGroup})` : act.value;
       if (act.valueKey && VALUED.includes(act.tool)) h.value = act.valueKey;
