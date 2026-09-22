@@ -11,7 +11,7 @@ import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { chromium } from "playwright";
 import { WebSocket } from "ws";   // node 20 has no global one
-import { findEndpoint, userDataDir, inspectPage, readActivePort, projectLabel, browserConfig, AttachedBrowser, HELPER_EXTENSION_ID, HELPER_VERSION } from "../src/browsers.mjs";
+import { findEndpoint, userDataDir, inspectPage, readActivePort, projectLabel, browserConfig, AttachedBrowser, remoteDebuggingEnabled, HELPER_EXTENSION_ID, HELPER_VERSION } from "../src/browsers.mjs";
 import { Barq } from "../src/session.mjs";
 
 const sleep = ms => new Promise(done => setTimeout(done, ms));
@@ -41,15 +41,44 @@ test("user-data directories resolve per platform", () => {
 
 test("findEndpoint reads DevToolsActivePort and ignores a stale one", async () => {
   const dir = tmp();
-  const srv = net.createServer().listen(0);
+  // a port that is open but says nothing back, the way a browser that was replaced on it leaves it
+  const quiet = new Set();
+  const srv = net.createServer(s => { quiet.add(s); s.on("close", () => quiet.delete(s)); }).listen(0);
   await new Promise(r => srv.once("listening", r));
   writeFileSync(join(dir, "DevToolsActivePort"), `${srv.address().port}\n/devtools/browser/abc\n`);
   assert.equal((await findEndpoint(dir)).ws, `ws://127.0.0.1:${srv.address().port}/devtools/browser/abc`);
+  for (const s of quiet) s.destroy();
   srv.close();
   await new Promise(r => srv.once("close", r));
   await assert.rejects(findEndpoint(dir), /remote debugging/);
   await assert.rejects(findEndpoint("netscape"), /Unknown browser/);
   assert.equal((await findEndpoint("ws://127.0.0.1:1/devtools/browser/x")).ws, "ws://127.0.0.1:1/devtools/browser/x");
+  scrub(dir);
+});
+
+test("the remote debugging box is read from the browser's own record of it", () => {
+  const dir = tmp();
+  assert.equal(remoteDebuggingEnabled(dir), null, "a browser that was never asked says nothing");
+  writeFileSync(join(dir, "Local State"), JSON.stringify({ devtools: { remote_debugging: { "user-enabled": true } } }));
+  assert.equal(remoteDebuggingEnabled(dir), true);
+  writeFileSync(join(dir, "Local State"), JSON.stringify({ devtools: { remote_debugging: { "user-enabled": false } } }));
+  assert.equal(remoteDebuggingEnabled(dir), false);
+  writeFileSync(join(dir, "Local State"), "{ not json");
+  assert.equal(remoteDebuggingEnabled(dir), null);
+  scrub(dir);
+});
+
+test("findEndpoint believes the browser over a stale path beside the port", async () => {
+  const dir = tmp();
+  const live = http.createServer((req, res) => {
+    res.setHeader("content-type", "application/json");
+    res.end(JSON.stringify(req.url === "/json/version" ? { webSocketDebuggerUrl: `ws://127.0.0.1:${live.address().port}/devtools/browser/live` } : {}));
+  });
+  await new Promise(r => live.listen(0, "127.0.0.1", r));
+  const port = live.address().port;
+  writeFileSync(join(dir, "DevToolsActivePort"), `${port}\n/devtools/browser/from-a-browser-that-has-gone\n`);
+  assert.equal((await findEndpoint(dir)).ws, `ws://127.0.0.1:${port}/devtools/browser/live`);
+  live.close();
   scrub(dir);
 });
 

@@ -6,6 +6,7 @@ import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join, isAbsolute } from "node:path";
 import net from "node:net";
+import http from "node:http";
 import { relayEndpoint } from "./relay.mjs";
 
 const sleep = ms => new Promise(done => setTimeout(done, ms));
@@ -66,33 +67,91 @@ export function listening(port, { host = "127.0.0.1", timeout = 500 } = {}) {
   });
 }
 
+// The "Allow remote debugging for this browser instance" box, as the browser records it: true
+// while it is ticked, false once it has been unticked, null when this browser was never asked.
+// Ticking it starts the browser's debugging server; it doesn't allow anyone in, which is why a
+// connection is still announced to the user.
+export function remoteDebuggingEnabled(dir) {
+  try {
+    const on = JSON.parse(readFileSync(join(dir, "Local State"), "utf8"))?.devtools?.remote_debugging?.["user-enabled"];
+    return typeof on === "boolean" ? on : null;
+  } catch { return null; }
+}
+
+// What the browser says its own endpoint is. Worth asking, because a browser started on the same
+// port with a different profile leaves a DevToolsActivePort file behind naming a browser that is
+// gone, and connecting to that path is refused at the upgrade. Browsers whose remote debugging was
+// switched on from their inspect page don't answer this at all, and the file is then all there is.
+// Returns the endpoint, or null with `refused` set when the browser is there but hasn't let anyone
+// in. A connection of its own rather than a pooled one: whatever is on that port may never answer,
+// and a socket left open in a pool afterwards holds up whoever wants to close the port.
+function askEndpoint(port, { host = "127.0.0.1", timeout = 700 } = {}) {
+  return new Promise(resolve => {
+    const req = http.get({ host, port, path: "/json/version", agent: false, timeout }, res => {
+      if (res.statusCode !== 200) { res.resume(); return resolve({ ws: null, refused: res.statusCode === 403 }); }
+      let body = "";
+      res.setEncoding("utf8");
+      res.on("data", chunk => { body += chunk; });
+      res.on("end", () => { try { resolve({ ws: JSON.parse(body).webSocketDebuggerUrl ?? null }); } catch { resolve({ ws: null }); } });
+    });
+    req.on("timeout", () => req.destroy());
+    req.on("error", () => resolve({ ws: null }));
+  });
+}
+
+// The websocket path a browser wrote next to its port, for a DevTools address that won't list it.
+function endpointForPort(port, { host = "127.0.0.1", platform = process.platform, ...opts } = {}) {
+  for (const name of Object.keys(USER_DATA_DIRS[platform] ?? {})) {
+    const dir = userDataDir(name, { platform, ...opts });
+    const active = dir && readActivePort(dir);
+    if (active?.port === port && active.path) return { name, dir, ws: `ws://${host}:${port}${active.path}` };
+  }
+  return null;
+}
+
 // spec: a ws:// endpoint, an http:// DevTools address, a browser name from USER_DATA_DIRS,
 // "auto" (the first of those with remote debugging on), or a user-data directory.
 export async function findEndpoint(spec = "auto", opts = {}) {
   if (/^wss?:\/\//.test(spec)) return { name: "custom", ws: spec };
   if (/^https?:\/\//.test(spec)) {
+    const at = new URL(spec);
     const res = await fetch(`${spec.replace(/\/+$/, "")}/json/version`, { signal: AbortSignal.timeout(5000) });
     if (res.status === 403) throw new Error(`${spec} refused the connection: accept the browser's "Allow remote debugging" prompt, then retry`);
+    // a browser that only switched remote debugging on from its inspect page keeps its list of
+    // targets to itself, and the path it wrote beside the port is the way in
+    if (res.status === 404) {
+      const found = endpointForPort(+at.port, { host: at.hostname, ...opts });
+      if (found) return { ...found, name: "custom" };
+      throw new Error(`${spec} doesn't say where to connect (404), and no browser on this computer recorded port ${at.port}. Use the browser's name, or a ws:// address.`);
+    }
     if (!res.ok) throw new Error(`${spec}/json/version answered ${res.status}`);
     return { name: "custom", ws: (await res.json()).webSocketDebuggerUrl };
   }
   const platform = opts.platform ?? process.platform;
   const names = spec === "auto" ? Object.keys(USER_DATA_DIRS[platform] ?? {}) : [spec];
   const seen = [];
+  let refused = false;
   for (const name of names) {
     const dir = userDataDir(name, opts);
     if (!dir) continue;
     const active = readActivePort(dir);
     if (!active) continue;
-    if (await listening(active.port)) return { name: isAbsolute(name) ? "custom" : name, dir, ws: `ws://127.0.0.1:${active.port}${active.path}` };
-    seen.push(name);
+    if (!(await listening(active.port))) { seen.push(name); continue; }
+    const live = await askEndpoint(active.port);
+    refused ||= !!live.refused;
+    // what the browser answers beats what it wrote down, and if it answers nothing the file stands
+    if (live.ws || active.path) return { name: isAbsolute(name) ? "custom" : name, dir, ws: live.ws || `ws://127.0.0.1:${active.port}${active.path}` };
   }
   const which = spec === "auto" ? "No Chromium-family browser" : isAbsolute(spec) ? `The browser using ${spec}` : `${spec}`;
   if (spec !== "auto" && !isAbsolute(spec) && !USER_DATA_DIRS[platform]?.[spec]) {
     throw new Error(`Unknown browser "${spec}". Use one of: ${Object.keys(USER_DATA_DIRS[platform] ?? {}).join(", ")}, auto, a user-data directory, or a ws:// or http:// DevTools address`);
   }
+  if (refused) throw new Error(`${which} is running with remote debugging on but hasn't let anything connect yet. Look for an "Allow remote debugging" prompt and click Allow, then try again.`);
   const stale = seen.length ? ` (${seen.join(", ")} left a DevToolsActivePort file but isn't listening: is it still running?)` : "";
-  throw new Error(`${which} has remote debugging on${stale}. Start the browser, open ${inspectPage(spec === "auto" ? "chrome" : spec)} and tick "Allow remote debugging for this browser instance".`);
+  // the box is recorded per browser, so it can say which of the two things is actually missing
+  const unticked = names.filter(n => { const d = userDataDir(n, opts); return d && remoteDebuggingEnabled(d) === false; });
+  const box = unticked.length ? ` ${unticked.join(", ")} has the box unticked.` : "";
+  throw new Error(`${which} has remote debugging on${stale}.${box} Start the browser, open ${inspectPage(spec === "auto" ? "chrome" : spec)} and tick "Allow remote debugging for this browser instance".`);
 }
 
 // The helper extension in extension/ (its manifest key pins this id). Loaded unpacked once per
