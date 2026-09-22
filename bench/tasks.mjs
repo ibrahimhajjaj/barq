@@ -87,6 +87,11 @@ export const TASKS = [
   task("wiki-search", "large-page", "https://en.wikipedia.org/wiki/Main_Page", [
     step("Search for the article and open it", { values: { query: "Alan Turing" }, assert: "() => location.pathname === '/wiki/Alan_Turing'" })
   ]),
+  // A goal that names what it wants without naming where to type it, on a page whose own domain
+  // carries one of the goal's words. Both of those have produced a wrong "done" before.
+  task("wiki-search-open", "large-page", "https://en.wikipedia.org/wiki/Main_Page", [
+    step("Open the Wikipedia article about Gödel's incompleteness theorems.", { assert: "() => location.pathname.includes('incompleteness')" })
+  ]),
   task("wiki-link", "large-page", "https://en.wikipedia.org/wiki/Alan_Turing", [
     step("Open the linked article about Bletchley Park", { assert: "() => location.pathname === '/wiki/Bletchley_Park'" })
   ]),
