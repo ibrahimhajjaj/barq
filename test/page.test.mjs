@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 import http from "node:http";
 import { chromium } from "playwright";
 import { Barq, repeatsBlock, actionError, estimateTokens, fitState } from "../src/session.mjs";
-import { pageDiff, formatPage, repeatedElements, optionSummary, clipMiddle, numbersIn, mayCount, kindsOf, countKind } from "../src/page-model.mjs";
+import { pageDiff, formatPage, repeatedElements, optionSummary, clipMiddle, numbersIn, mayCount, kindsOf, countKind, phrasesFrom, likelyFor } from "../src/page-model.mjs";
 
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 
@@ -112,6 +112,25 @@ test("a question about two things is split into two, and a phrase with 'and' in 
   assert.equal(split("Is the photo in black and white?"), null);
   // a fragment too short to stand as its own question is not a second question
   assert.equal(split("Is it done and is it?"), null);
+});
+
+test("a goal's own words are offered as things to type, minus the instruction verbs", () => {
+  assert.deepEqual(phrasesFrom("Search for \"blue ceramic mug\" and open the first result")[0], "blue ceramic mug");
+  const godel = phrasesFrom("Open the Wikipedia article about Gödel's incompleteness theorems.");
+  assert.equal(godel[0], "Gödel's incompleteness theorems", JSON.stringify(godel));
+  assert.ok(!godel.includes("Open"), "a verb is not a search term");
+  assert.deepEqual(phrasesFrom(""), []);
+});
+
+test("a page a little over the question's cap is trimmed to what the goal is about, in page order", () => {
+  const els = Array.from({ length: 300 }, (_, i) => ({ i, tag: "a", text: `Article ${i}` }));
+  els[250] = { i: 250, tag: "input:search", label: "Search Wikipedia" };
+  const kept = likelyFor(els, "Search Wikipedia for incompleteness theorems", 240);
+  assert.equal(kept.length, 240);
+  assert.ok(kept.some(e => e.label === "Search Wikipedia"), "the field the goal names survives the trim");
+  assert.deepEqual(kept.map(e => e.i), [...kept.map(e => e.i)].sort((a, b) => a - b), "and the order still runs down the page");
+  const small = els.slice(0, 10);
+  assert.equal(likelyFor(small, "anything", 240), small, "a page under the cap is handed back untouched");
 });
 
 test("a tab barq has not been sent anywhere says so", async () => {
@@ -263,9 +282,12 @@ test("an action, its target and its value are settled together or not at all", (
   // typing into a button is impossible, so the likeliest text field takes it instead
   let r = b.resolve(form, said("type", { 0: 0.7, 1: 0.3, 2: 0 }), { name: "Ada" });
   assert.deepEqual([r.tool, r.target, r.value], ["type", 1, "Ada"]);
-  // nothing to type: the step clicks rather than typing an empty string
+  // the caller gave nothing to type, so the round is marked for the goal to be asked for the text;
+  // only if the goal holds nothing usable does it fall back to clicking the field
   r = b.resolve(form, said("type", { 1: 0.9, 0: 0.1 }), {});
-  assert.equal(r.tool, "click", "the round clicked");
+  assert.equal(r.tool, "type");
+  assert.equal(r.typeNeedsText, true);
+  assert.equal(r.value, undefined);
   // an upload can only go to the file input, whatever was picked
   r = b.resolve(form, said("upload", { 0: 0.95, 1: 0.05 }), { name: "/tmp/f" });
   assert.equal(r.target, 2);
