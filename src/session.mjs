@@ -1222,7 +1222,7 @@ export class Barq {
   // contradict each other. One wording, asked the same way from both places that need it.
   async looksFinished(page, goal, history) {
     const { answers } = await this.call({ page, task: { goal, history: history.slice(-12) } }, {
-      complete: { type: "noul", instructions: "Is everything `task.goal` asks for already finished on `page`, so that no further action (such as pressing a submit, search or continue button) is needed?" },
+      complete: { type: "noul", instructions: "Has everything `task.goal` asks for already happened on `page`? No if `task.goal` itself still needs an action, such as pressing a submit, search or continue button. Yes when the page offers further steps that `task.goal` does not ask for." },
     });
     return +answers.complete.noul.toFixed(2);
   }
