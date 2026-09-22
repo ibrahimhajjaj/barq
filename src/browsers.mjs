@@ -2,7 +2,8 @@
 // user already has open (Chrome, Edge, Brave, ...), reached over the DevTools protocol so the agent
 // works inside the user's own profile with its logins, extensions and password manager.
 import { chromium } from "playwright";
-import { readFileSync } from "node:fs";
+import { readFileSync, existsSync, mkdirSync } from "node:fs";
+import { spawn } from "node:child_process";
 import { homedir } from "node:os";
 import { join, isAbsolute } from "node:path";
 import net from "node:net";
@@ -109,10 +110,74 @@ function endpointForPort(port, { host = "127.0.0.1", platform = process.platform
   return null;
 }
 
+// A browser barq starts and keeps to itself: its own profile directory and a debugging port it
+// picks. Nothing else has that profile open, so the browser has no reason to announce a connection
+// to it, and this is the one way of working that never asks. The price is that it starts out with
+// no logins: sign in once inside it and they stay, separately from the everyday browser.
+export function ownProfileDir({ platform = process.platform, env = process.env, home = homedir() } = {}) {
+  if (env.BARQ_OWN_PROFILE) return env.BARQ_OWN_PROFILE;
+  if (platform === "darwin") return join(home, MAC, "barq", "browser");
+  if (platform === "win32") return join(env.LOCALAPPDATA ?? join(home, "AppData", "Local"), "barq", "browser");
+  return join(env.XDG_DATA_HOME || join(home, ".local", "share"), "barq", "browser");
+}
+
+// Where the installed browsers usually are, best first. A real Chrome or Edge is preferred over the
+// Chromium that comes with the driver: sites treat it better, and it is the browser the user knows.
+const BROWSER_PATHS = {
+  darwin: [
+    "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+    "/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge",
+    "/Applications/Brave Browser.app/Contents/MacOS/Brave Browser",
+    "/Applications/Chromium.app/Contents/MacOS/Chromium",
+  ],
+  linux: ["/usr/bin/google-chrome", "/usr/bin/google-chrome-stable", "/usr/bin/microsoft-edge", "/usr/bin/brave-browser", "/usr/bin/chromium", "/usr/bin/chromium-browser"],
+  win32: [
+    "C:/Program Files/Google/Chrome/Application/chrome.exe",
+    "C:/Program Files (x86)/Google/Chrome/Application/chrome.exe",
+    "C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe",
+    "C:/Program Files/Microsoft/Edge/Application/msedge.exe",
+  ],
+};
+
+export function browserBinary({ platform = process.platform, env = process.env } = {}) {
+  if (env.BARQ_BROWSER_PATH) return env.BARQ_BROWSER_PATH;
+  const installed = (BROWSER_PATHS[platform] ?? []).find(file => existsSync(file));
+  if (installed) return installed;
+  try { return chromium.executablePath(); } catch { return null; }
+}
+
+// The endpoint of barq's own browser: the one already running on that profile, or a new one. It is
+// started detached so it outlives the session that needed it and the next one finds it there.
+export async function ownBrowser({ dir = ownProfileDir(), binary = browserBinary(), args = [], waitMs = 20_000 } = {}) {
+  const ready = async () => {
+    const active = readActivePort(dir);
+    return active && await listening(active.port) ? { name: "barq", dir, ws: `ws://127.0.0.1:${active.port}${active.path}` } : null;
+  };
+  const running = await ready();
+  if (running) return running;
+  if (!binary) throw new Error("No browser to start. Install Chrome or Edge, run `npx playwright install chromium`, or set BARQ_BROWSER_PATH.");
+  mkdirSync(dir, { recursive: true });
+  // port 0: the browser picks a free one and writes it into the profile, so two computers, two
+  // profiles or a port someone else took never collide
+  const child = spawn(binary, [`--user-data-dir=${dir}`, "--remote-debugging-port=0", "--no-first-run", "--no-default-browser-check", "--enable-blink-features=WebMCP", ...args], { detached: true, stdio: "ignore" });
+  child.unref();
+  const until = Date.now() + waitMs;
+  while (Date.now() < until) {
+    const open = await ready();
+    if (open) return open;
+    if (child.exitCode !== null) throw new Error(`${binary} stopped before its debugging port was up. Is another browser already using ${dir}?`);
+    await sleep(100);
+  }
+  throw new Error(`${binary} didn't open a debugging port within ${Math.round(waitMs / 1000)}s (profile ${dir})`);
+}
+
 // spec: a ws:// endpoint, an http:// DevTools address, a browser name from USER_DATA_DIRS,
-// "auto" (the first of those with remote debugging on), or a user-data directory.
+// "auto" (the first of those with remote debugging on), "own" for barq's own browser, or a
+// user-data directory.
 export async function findEndpoint(spec = "auto", opts = {}) {
   if (/^wss?:\/\//.test(spec)) return { name: "custom", ws: spec };
+  // the one spec that may start a browser rather than look for one
+  if (spec === "own") return ownBrowser(opts);
   if (/^https?:\/\//.test(spec)) {
     const at = new URL(spec);
     const res = await fetch(`${spec.replace(/\/+$/, "")}/json/version`, { signal: AbortSignal.timeout(5000) });
@@ -144,7 +209,7 @@ export async function findEndpoint(spec = "auto", opts = {}) {
   }
   const which = spec === "auto" ? "No Chromium-family browser" : isAbsolute(spec) ? `The browser using ${spec}` : `${spec}`;
   if (spec !== "auto" && !isAbsolute(spec) && !USER_DATA_DIRS[platform]?.[spec]) {
-    throw new Error(`Unknown browser "${spec}". Use one of: ${Object.keys(USER_DATA_DIRS[platform] ?? {}).join(", ")}, auto, a user-data directory, or a ws:// or http:// DevTools address`);
+    throw new Error(`Unknown browser "${spec}". Use one of: ${Object.keys(USER_DATA_DIRS[platform] ?? {}).join(", ")}, auto, own, a user-data directory, or a ws:// or http:// DevTools address`);
   }
   if (refused) throw new Error(`${which} is running with remote debugging on but hasn't let anything connect yet. Look for an "Allow remote debugging" prompt and click Allow, then try again.`);
   const stale = seen.length ? ` (${seen.join(", ")} left a DevToolsActivePort file but isn't listening: is it still running?)` : "";
@@ -184,7 +249,7 @@ export class AttachedBrowser {
     const endpoint = await findEndpoint(spec);
     // The tabs the user has open can no longer hold this up: a connection is only ever shown the
     // tabs it opened. So the wait is the browser asking to be allowed, and that is what to say.
-    const slow = () => new Error(`${endpoint.name} has not allowed the connection after ${Math.round(allowTimeoutMs / 1000)}s. Look for an "Allow remote debugging" prompt in ${endpoint.name} and click Allow, then try again. If there is no prompt, turn remote debugging off and on again at ${inspectPage(endpoint.name)}.`);
+    const slow = () => new Error(`${endpoint.name} has not allowed the connection after ${Math.round(allowTimeoutMs / 1000)}s. Look for an "Allow remote debugging" prompt in ${endpoint.name} and click Allow: it stays on screen and this connection is still waiting for it, so answering it late still works. If there is no prompt, turn remote debugging off and on again at ${inspectPage(endpoint.name)}. To never be asked, set BARQ_ATTACH=own and barq works in a browser of its own instead.`);
     // On recent browsers each new connection waits for the user to click "Allow". One approved
     // connection per browser run is shared through a relay process, so a new server (another agent
     // session, a restart) doesn't ask again. Straight to the browser when the relay is off or

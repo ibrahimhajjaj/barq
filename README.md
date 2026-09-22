@@ -83,6 +83,14 @@ pays, sends or deletes: ask the user, then call again with `allow_irreversible`)
 Your own tabs stay out of its sight: barq sees only the tabs it opened itself, so it can't read
 yours, can't answer a dialog in one, and a tab the browser has put to sleep can't stall it.
 
+### A browser of its own
+
+`BARQ_ATTACH=own` uses a browser barq starts and keeps to itself, on a profile nothing else has
+open. That browser never asks to be allowed, so there is no prompt and no relay to lose. It starts
+with no logins, so sign in inside it once and they stay; it stays open between sessions, and the
+next one finds it. `BARQ_BROWSER_PATH` picks which browser to start (Chrome, then Edge, then Brave,
+then Chromium, then the driver's own), `BARQ_OWN_PROFILE` where to keep it.
+
 ## Logins
 
 Never put a password in `values`. Pass a reference instead; it is read at the moment of typing and

@@ -18,9 +18,10 @@
     "browser": {
       "type": "string",
       "title": "Work in your own browser",
-      "description": "launch: start a separate Chromium. Or name a running browser to work inside it, with your logins: chrome, edge, brave, chromium, vivaldi, arc, or auto (the first one found). It needs remote debugging allowed once (chrome://inspect/#remote-debugging).",
+      "description": "launch: start a separate Chromium. own: a browser barq keeps to itself, which never asks to be allowed (sign in inside it once). Or name a running browser to work inside it, with your logins: chrome, edge, brave, chromium, vivaldi, arc, or auto (the first one found). Those need remote debugging allowed once (chrome://inspect/#remote-debugging).",
       "options": [
         "launch",
+        "own",
         "chrome",
         "edge",
         "brave",

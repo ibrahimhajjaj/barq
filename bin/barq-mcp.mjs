@@ -5,6 +5,8 @@
 //
 // Env: TYPESAFE_API_KEY (or the macOS keychain item "typesafe-api-key"),
 //      BARQ_ATTACH=chrome|edge|brave|...|auto to work in a browser the user already runs,
+//      BARQ_ATTACH=own for a browser barq starts and keeps to itself, which never asks to be allowed
+//      (BARQ_OWN_PROFILE=/dir where it lives, BARQ_BROWSER_PATH=/path which browser it starts),
 //      BARQ_PLACEMENT=auto|group|window|tab for where the agent's tabs go in that browser,
 //      otherwise a launched Chromium: BARQ_HEADED=1, BARQ_CHANNEL=chrome|msedge,
 //      BARQ_PROFILE=/dir (persistent profile, keeps logins),

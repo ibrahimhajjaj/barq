@@ -85,7 +85,11 @@ When the server is set to attach (`BARQ_ATTACH`, or the plugin's browser option)
 agent works inside the user's running Chrome or Edge with their logins. Its tabs sit in a
 collapsed tab group named after the project (with the helper extension) or in a separate window, and never take
 over the user's tab. The browser asks the user to "Allow" remote debugging once per browser run
-(the connection is kept and shared between sessions): tell them to click it if a call waits.
+(the connection is kept and shared between sessions): tell them to click it if a call waits. The
+prompt stays on screen and the waiting connection stays with it, so answering it a few minutes
+later still works, and a call that returned before they clicked succeeds on the next try. If they
+would rather never be asked, `BARQ_ATTACH=own` works in a browser barq keeps to itself, which
+starts with none of their logins.
 
 ## When something goes wrong
 

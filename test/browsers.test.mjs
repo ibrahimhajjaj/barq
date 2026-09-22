@@ -11,7 +11,7 @@ import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { chromium } from "playwright";
 import { WebSocket } from "ws";   // node 20 has no global one
-import { findEndpoint, userDataDir, inspectPage, readActivePort, projectLabel, browserConfig, AttachedBrowser, remoteDebuggingEnabled, HELPER_EXTENSION_ID, HELPER_VERSION } from "../src/browsers.mjs";
+import { findEndpoint, userDataDir, inspectPage, readActivePort, projectLabel, browserConfig, AttachedBrowser, ownBrowser, ownProfileDir, remoteDebuggingEnabled, HELPER_EXTENSION_ID, HELPER_VERSION } from "../src/browsers.mjs";
 import { Barq } from "../src/session.mjs";
 
 const sleep = ms => new Promise(done => setTimeout(done, ms));
@@ -80,6 +80,38 @@ test("findEndpoint believes the browser over a stale path beside the port", asyn
   assert.equal((await findEndpoint(dir)).ws, `ws://127.0.0.1:${port}/devtools/browser/live`);
   live.close();
   scrub(dir);
+});
+
+test("barq's own browser starts once and is found again after that", async () => {
+  const dir = tmp();
+  let browser;
+  try {
+    const first = await ownBrowser({ dir, binary: chromium.executablePath(), args: ["--headless=new", "--no-sandbox"] });
+    assert.match(first.ws, /^ws:\/\/127\.0\.0\.1:\d+\/devtools\/browser\//);
+    assert.equal(first.name, "barq");
+    // no prompt to answer on a profile nothing else has open: the connection just opens
+    browser = await chromium.connectOverCDP(first.ws, { noDefaults: true });
+    assert.ok(browser.isConnected());
+    const again = await ownBrowser({ dir, binary: "/nonexistent", args: ["--headless=new"] });
+    assert.equal(again.ws, first.ws, "the second call finds the browser the first one started");
+  } finally {
+    await browser?.close().catch(() => {});
+    const active = readActivePort(dir);
+    if (active) await fetch(`http://127.0.0.1:${active.port}/json/version`).then(async r => {
+      const ws = new WebSocket((await r.json()).webSocketDebuggerUrl);
+      await new Promise(done => { ws.once("open", () => { ws.send(JSON.stringify({ id: 1, method: "Browser.close" })); setTimeout(done, 500); }); ws.once("error", done); });
+      ws.close();
+    }).catch(() => {});
+    await sleep(500);
+    scrub(dir);
+  }
+});
+
+test("its profile sits where the platform keeps application data", () => {
+  assert.equal(ownProfileDir({ platform: "darwin", env: {}, home: "/Users/u" }), "/Users/u/Library/Application Support/barq/browser");
+  assert.equal(ownProfileDir({ platform: "linux", env: {}, home: "/home/u" }), "/home/u/.local/share/barq/browser");
+  assert.equal(ownProfileDir({ platform: "win32", env: { LOCALAPPDATA: "C:/Users/u/AppData/Local" } }), join("C:/Users/u/AppData/Local", "barq", "browser"));
+  assert.equal(ownProfileDir({ platform: "darwin", env: { BARQ_OWN_PROFILE: "/tmp/p" } }), "/tmp/p");
 });
 
 // A running browser with remote debugging on, as the user would have it.
