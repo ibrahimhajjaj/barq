@@ -116,6 +116,35 @@ export function pageDiff(before, after) {
   return d;
 }
 
+// Words worth matching a goal against: everything a person would read off the control.
+const NAME_OF = e => `${e.label ?? ""} ${e.text ?? ""} ${e.placeholder ?? ""} ${e.name ?? ""} ${e.near ?? ""}`.toLowerCase();
+const GOAL_WORDS = goal => [...new Set(String(goal).toLowerCase().match(/[\p{L}\p{N}][\p{L}\p{N}'-]{2,}/gu) ?? [])];
+
+// The words in a goal that could be meant as something to type. Jev cannot write text, but it can
+// pick, so a goal that names what to look for can still fill a search box: quoted text first, then
+// what follows the words people use to introduce a term, then the runs of capitalised words, then
+// the goal with its leading instruction words removed.
+const LEAD_IN = /\b(?:about|for|named|called|titled|search(?:ing)? for|look(?:ing)? up|find|enter|type)\s+(.{3,80}?)(?:[.,;]|$)/giu;
+const OPENER = /^\s*(?:please\s+)?(?:open|go to|navigate to|find|search|look up|show|read|view|get)\s+(?:the\s+|a\s+|an\s+)?/iu;
+const TRAILING = /\s*(?:\b(?:page|article|entry|result|results|on [a-z]+)\b[\s.]*)+$/iu;
+
+export function phrasesFrom(goal) {
+  const text = String(goal ?? "").trim();
+  const out = [];
+  const INSTRUCTION = /^(?:open|go|navigate|find|search|look|show|read|view|get|click|type|enter|use|then|please)$/iu;
+  const add = p => {
+    const clean = p.replace(/^["'“”‘’\s]+|["'“”‘’\s.,;:]+$/gu, "").trim();
+    if (clean.length < 2 || clean.length > 80 || INSTRUCTION.test(clean)) return;      // a verb is not a search term
+    if (!out.some(x => x.toLowerCase() === clean.toLowerCase())) out.push(clean);
+  };
+  for (const m of text.matchAll(/["'“‘]([^"'“”‘’]{2,80})["'”’]/gu)) add(m[1]);
+  for (const m of text.matchAll(LEAD_IN)) add(m[1]);
+  const capitalised = text.match(/\p{Lu}[\p{L}'’-]*(?:\s+\p{Lu}[\p{L}'’-]*)*/gu) ?? [];
+  for (const run of capitalised) if (run.split(/\s+/).length > 1 || run.length > 3) add(run);
+  add(text.replace(OPENER, "").replace(TRAILING, ""));
+  return out.slice(0, 10);
+}
+
 const MOST_REPEATS = 10;
 
 // The names a page carries more than once, commonest first: the rows of a list, the buttons of a table.

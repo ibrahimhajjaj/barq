@@ -568,7 +568,7 @@ export class Barq {
       error: { type: "noul", instructions: "Is `page` showing an error or a refusal that the actions in `task.history` brought about, such as wrong credentials, a validation message or a not-found notice?" },
       login: { type: "noul", instructions: "Before `task.goal` can go on, is `page` a sign-in or sign-up screen, or asking the user to log in?" },
       irreversible: { type: "noul", instructions: "Would the next step toward `task.goal` on `page` do something outside this browser that is hard to take back, like placing an order, paying, sending a message, deleting data or publishing?" },
-      tool: { type: "choice", instructions: "Given what `task.history` has already done, which action comes next toward `task.goal` on `page`?", criteria: TOOLS },
+      tool: { type: "choice", instructions: "What is the next action toward `task.goal` on `page`, given what `task.history` already did?", criteria: tools },
     };
     if (named) questions.value = { type: "choice", instructions: "If the next action toward `task.goal` types, selects or uploads something, which of `task.values` should it use? Prefer values not yet entered on `page`.", criteria: jevValues };
     return questions;
@@ -678,8 +678,13 @@ export class Barq {
         const anyFileInput = page.elements.find(FILEISH);   // a file input is never ambiguous
         if (anyFileInput) [number, p] = [String(anyFileInput.i), 0.5];
       } else if (tool === "type" || tool === "select") tool = "click";
+      // Enter goes to a field. Aimed at a menu entry or a button it does nothing at all, and the
+      // thing meant by it is plainly a click on what was picked.
+      else if (tool === "press_enter") tool = "click";
     }
-    if (tool === "type" && !Object.keys(values).length) tool = "click";   // nothing to type: open or focus it instead
+    // nothing to type: the caller gave no values, so the goal itself is asked for the text later;
+    // if that finds nothing either, the round falls back to clicking the field
+    const typeNeedsText = tool === "type" && !Object.keys(values).length;
 
     // With secrets hidden Jev sees only the names of the values, so a password and its field can
     // come back crossed. A password goes in a password field, and a password field takes nothing else.
@@ -703,6 +708,7 @@ export class Barq {
       el: elementOf.get(number),
       valueKey,
       value: valueKey != null ? values[valueKey] : undefined,
+      typeNeedsText,
       candidates: ranked.slice(0, 3).map(([i, prob]) => ({ i: +i, p: +prob.toFixed(2), el: brief(elementOf.get(i)) })),
     };
   }
@@ -1199,6 +1205,22 @@ export class Barq {
     return +answers.complete.noul.toFixed(2);
   }
 
+  // Jev writes nothing, but it can pick, so a goal that names what to look for can still fill a
+  // field the caller gave no value for: the goal's own phrases become the options. Returns the
+  // text to type, or null when none of them is the thing.
+  async chooseText(page, goal, el) {
+    const phrases = phrasesFrom(goal);
+    if (!phrases.length) return null;
+    const criteria = Object.fromEntries([...phrases.map(p => [p, null]), ["none of these", "nothing here should be typed into the field"]]);
+    const field = { tag: el?.tag, label: el?.label, placeholder: el?.placeholder, near: el?.near };
+    const { answers } = await this.call({ page: { url: page.url, title: page.title, text: page.text.slice(0, 1200) }, task: { goal }, field }, {
+      text: { type: "choice", instructions: "Which of these, taken from `task.goal`, should be typed into `field` to get on with `task.goal`?", criteria },
+    });
+    const picked = answers.text.choice;
+    const sure = answers.text.probabilities?.[picked] ?? 1;
+    return picked === "none of these" || sure < 0.4 ? null : picked;
+  }
+
   // Which key to press, for a round that chose press_key without saying which.
   async chooseKey(page, goal, history) {
     const seenPage = { url: page.url, title: page.title, text: page.text, dialogs: page.dialogs };
@@ -1235,6 +1257,10 @@ export class Barq {
     const t0 = Date.now(), calls0 = this.stats.calls;
     const history = [], rounds = [];
     let prevPage = null, waits = 0, page = null, status = "max_actions", info, pending, accounts, retried = false;
+    // Typing the goal's own words puts them on the page, which is exactly what a "does this page
+    // show the goal achieved" question reads. The round after one of those has to be carried by
+    // something other than the echo, so the first such finish is not taken at its word.
+    let echoedGoal = false;
     const seen = new Map();
     ({ prompt: this.promptText } = values);
     this.loginIntent(values);
@@ -1314,6 +1340,9 @@ export class Barq {
       }
       log(`  r${round}: ${act.tool}(${r.p_tool}) -> #${act.target} ${r.el} (${r.p_target})${act.valueKey ? ` value=${act.valueKey}` : ""}  done=${r.done} err=${r.error_shown} login=${r.login} irrev=${r.irreversible}  [${page.elements.length} elements${a.stages === 2 ? ", asked in two stages" : ""}]`);
 
+      // the goal's words are on the page because barq typed them there, so this round's "looks
+      // done" is not evidence; the next one, after something has actually been acted on, is
+      if (echoedGoal && done >= doneAt) { echoedGoal = false; done = 0; r.echo_ignored = true; }
       if (act.tool !== "none" && round > 0 && done >= doneAt && done < 0.85) {
         // "the goal is met" and "here is the next action" disagree: one stricter question settles it
         r.confirm = await this.looksFinished(page, goal, history);
@@ -1401,6 +1430,20 @@ export class Barq {
       }
 
       // questions that only make sense once the action is known
+      // A goal's own words go into a search or a text field, never into a control that is offering
+      // things to pick: typing there leaves the wanted option merely showing on screen, which looks
+      // finished and is not, since nothing was chosen.
+      const offersOptions = SELECTISH(act.el) || /\[(combobox|listbox)\]/.test(act.el?.tag ?? "")
+        || page.elements.some(e => /\[option\]/.test(e.tag));
+      if (act.typeNeedsText && offersOptions) {
+        act.tool = "click";
+        act.typeNeedsText = false;
+      }
+      if (act.typeNeedsText) {
+        act.value = await this.chooseText(page, goal, act.el).catch(() => null);
+        if (act.value == null) act.tool = "click";      // nothing in the goal fits: open the field instead
+        else { r.tool = act.tool; r.text_from_goal = act.value; echoedGoal = true; }
+      }
       if (act.tool === "select" && act.el?.options?.length && act.value == null) {
         // A dropdown that can't be read or answered is a failed action the next round sees, not an
         // exception out of do(); running out of time still ends the step.
