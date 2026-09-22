@@ -87,6 +87,10 @@ const MAX_SINGLE = 240;   // a choice takes 255 criteria at most; the rest of th
 const HIGHLIGHT_MS = Number(process.env.BARQ_HIGHLIGHT_MS ?? 150);
 // How long after an action ends settle() keeps watching, for work the page starts a moment later
 const POST_ACTION_MS = 350;
+// The first request of a process answers about half a second slower than the ones after it, by the
+// API's own timing rather than ours. Asking it something trivial while the first page is still
+// loading means the caller never pays for that.
+let warmed = false;
 // The frame a password manager's extension puts under a login field to list the saved logins
 // (Bitwarden's in-page menu).
 const PASSWORD_MENU = /^(chrome|moz)-extension:\/\/[^/]+\/(overlay\/)?menu-list\.html/;
@@ -344,6 +348,10 @@ export class Barq {
 
   async open(url) {
     const t0 = Date.now();
+    if (!warmed) {
+      warmed = true;
+      this.request({ page: { url: "about:blank" } }, { q: { type: "noul", instructions: "Answer about `page`: is this page blank?" } }, { retries: 0, timeout: 8000 }).catch(() => {});
+    }
     this.breakFlow();
     this.lastActionAt = t0;
     await this.page.goto(url, { timeout: 30_000, waitUntil: "commit" });
