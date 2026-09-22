@@ -167,6 +167,78 @@ export function phrasesFrom(goal) {
   return out.slice(0, 10);
 }
 
+// Goals that a page can be read for an answer to, rather than asked about. A step that says what it
+// wants in so many words ("type X into the search box", "choose Purple", "open the About page",
+// "tick Remember me") is finished when the page says so, and code can see that as well as a model
+// can, at no cost and without an opinion. Anything less plain than these returns null and is asked
+// about as before.
+const PLAIN_GOALS = [
+  [/^\s*(?:please\s+)?(?:type|enter|fill in|fill|write|put)\b/iu, "type"],
+  [/^\s*(?:please\s+)?(?:choose|select|pick)\b/iu, "choose"],
+  [/^\s*(?:please\s+)?(?:open|go to|navigate to|visit)\b/iu, "open"],
+  [/^\s*(?:please\s+)?(?:tick|check|mark)\b/iu, "tick"],
+];
+// more than one thing to do, so the page showing one of them proves nothing
+const COMPOUND = /\b(?:then|after that|and then)\b|,\s*(?:then|and)\b|\band\s+(?:\w+\s+)?(?:continue|submit|save|send|open|click|press|choose|select|confirm|apply|search|go)\b/iu;
+
+export function plainGoal(goal, values = {}) {
+  const text = String(goal ?? "");
+  if (!text || COMPOUND.test(text)) return null;
+  const hit = PLAIN_GOALS.find(([re]) => re.test(text));
+  if (!hit) return null;
+  const kind = hit[1];
+  // what it should say afterwards: the caller's own value where there is one, else the goal's words
+  const secret = Object.entries(values).some(([k, v]) => /pass|pwd|pin|otp|token|card|secret/i.test(k) || /^(keychain|bw|env|autofill)[:.]/.test(String(v)));
+  if (secret) return null;                                   // nothing readable to check against
+  // "Choose Two in the dropdown" names the thing right after the verb, which the general phrase
+  // reader passes over because it is one short word
+  const named = text.match(/^\s*(?:please\s+)?(?:type|enter|fill in|fill|write|put|choose|select|pick|open|go to|navigate to|visit|tick|check|mark)\s+(?:the\s+|a\s+|an\s+)?['"“]?([^,.;'"”]{2,40}?)['"”]?(?:\s+(?:in|into|from|on|at|of|for)\b|[,.;]|$)/iu);
+  // Every value the caller gave has to show up, not just one of them: a goal that fills five
+  // fields is not finished because the first one took.
+  const given = Object.values(values).map(String).filter(w => w.length >= 2);
+  if (given.length) return { kind, wants: given, all: true };
+  const wants = [...(named ? [named[1].trim()] : []), ...phrasesFrom(text)].filter(w => w.length >= 2);
+  return wants.length ? { kind, wants: wants.slice(0, 6), all: false } : null;
+}
+
+const escaped = s => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+// A single word has to be a word where it is found: "tick" is not shown by "sticker". Anything
+// longer is distinctive enough to match as it stands.
+const holds = (text, want) => {
+  const hay = String(text ?? "").toLowerCase(), needle = String(want).toLowerCase().trim();
+  if (!hay || needle.length < 2) return false;
+  if (/\s/.test(needle)) return hay.includes(needle);
+  return new RegExp(`(^|[^\\p{L}\\p{N}])${escaped(needle)}([^\\p{L}\\p{N}]|$)`, "u").test(hay);
+};
+
+// Whether the page now shows what a plain goal asked for. true means finished, null means the page
+// cannot say, and null is what keeps the question honest: only a clear yes skips it.
+export function goalMet(plain, page) {
+  if (!plain) return null;
+  const { kind, wants } = plain;
+  const els = page.elements ?? [];
+  if (kind === "type") {
+    const shows = w => els.some(e => FIELDISH(e) && holds(e.value, w));
+    return (plain.all ? wants.every(shows) : wants.some(shows)) ? true : null;
+  }
+  if (kind === "choose") {
+    const chosen = els.some(e => wants.some(w => (SELECTISH(e) && holds(e.value, w))
+      || (e.active === true && (holds(e.text, w) || holds(e.label, w)))
+      || (e.checked === true && (holds(e.text, w) || holds(e.label, w)))));
+    return chosen ? true : null;
+  }
+  if (kind === "tick") {
+    const ticked = els.some(e => e.checked === true && wants.some(w => holds(e.label, w) || holds(e.text, w) || holds(e.near, w)));
+    return ticked ? true : null;
+  }
+  if (kind === "open") {
+    const slug = w => w.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, "");
+    const address = `${page.url} ${page.title}`.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, "");
+    return wants.some(w => slug(w).length >= 6 && address.includes(slug(w))) ? true : null;
+  }
+  return null;
+}
+
 const MOST_REPEATS = 10;
 
 // The names a page carries more than once, commonest first: the rows of a list, the buttons of a table.

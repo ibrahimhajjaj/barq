@@ -13,7 +13,7 @@ import { chromium } from "playwright";
 import { getDomain } from "tldts";
 import { jev } from "./jev.mjs";
 import { ENUMERATE } from "./page-script.mjs";
-import { FIELDISH, SELECTISH, FILEISH, brief, likelyFor, phrasesFrom, pageDiff, repeatedElements, formatPage, clipMiddle, optionSummary, numbersIn, kindsOf, countKind, mayCount } from "./page-model.mjs";
+import { FIELDISH, SELECTISH, FILEISH, brief, likelyFor, phrasesFrom, plainGoal, goalMet, pageDiff, repeatedElements, formatPage, clipMiddle, optionSummary, numbersIn, kindsOf, countKind, mayCount } from "./page-model.mjs";
 import { readBlocks, toText, passages, findPassages } from "./reader.mjs";
 import { commitsSomething, COMMITTING_TOOLS } from "./safety.mjs";
 import { forJev, resolveValue, autofillAccount } from "./secrets.mjs";
@@ -1271,6 +1271,9 @@ export class Barq {
     const history = [], rounds = [];
     let prevPage = null, waits = 0, page = null, status = "max_actions", info, pending, accounts, retried = false;
     let lastTool = null;
+    // A goal that says plainly what it wants can be checked against the page instead of asked
+    // about: the page itself is better evidence than an opinion, and it costs nothing.
+    const plain = plainGoal(goal, values);
     // Typing the goal's own words puts them on the page, which is exactly what a "does this page
     // show the goal achieved" question reads. The round after one of those has to be carried by
     // something other than the echo, so the first such finish is not taken at its word.
@@ -1344,6 +1347,14 @@ export class Barq {
         continue;
       }
       if (counting) await this.count(counting, page, goal);
+
+      // something has been done and the page now shows what the goal asked for: no need to ask
+      if (plain && round > 0 && history.slice(before).some(h => h.action) && goalMet(plain, page) === true) {
+        status = "done";
+        info = `the page shows it: ${plain.kind} ${plain.wants[0]}`;
+        rounds.push({ round, checked_in_page: plain.wants[0] });
+        break;
+      }
       const stillThere = early && samePage(page) === earlyPrint;
       const a = stillThere
         ? await guess
