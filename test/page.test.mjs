@@ -175,6 +175,17 @@ test("a goal that says plainly what it wants is checked against the page, and an
   assert.equal(plainGoal("Make the table sorted by last name", {}), null);
 });
 
+test("a dropdown option the goal names outright is chosen without reading the list", async () => {
+  const b2 = await Barq.launch({ browser });
+  await b2.page.setContent(`<select><option>All stays</option><option>Design</option><option>Nature</option></select>`);
+  const [{ i }] = (await b2.snapshot()).elements;
+  b2.decide = async () => ({ ...clickAnswers(i), tool: { choice: "select", probabilities: { select: 0.9 } } });
+  b2.call = async () => assert.fail("the list was read out although the goal named the option");
+  const r = await b2.do("Choose Design in the category dropdown", { maxActions: 1 });
+  assert.equal(await b2.page.locator("select").inputValue(), "Design", r.status);
+  await b2.close();
+});
+
 test("a tab barq has not been sent anywhere says so", async () => {
   const b2 = await Barq.launch({ browser });
   assert.equal(b2.onBlankTab(), true, "a fresh tab is blank until it is sent somewhere");
@@ -960,7 +971,8 @@ test("a dropdown whose options can't be read is a recorded action error, and the
   await b.page.setContent(`<select><option>One</option><option>Two</option></select>`);
   b.decide = async () => ({ ...clickAnswers(el.i), tool: { choice: 'select', probabilities: { select: 1 } } });
   b.call = () => new Promise((_, reject) => b.abort.signal.addEventListener('abort', () => reject(new Error('aborted'))));
-  r = await b.do('Choose Two', { timeoutMs: 1000 });
+  // a goal that does not name the option, so the list has to be read and the step is left waiting
+  r = await b.do('Choose the second thing in the list', { timeoutMs: 1000 });
   assert.equal(r.status, 'timeout');
 });
 

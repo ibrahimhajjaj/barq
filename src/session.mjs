@@ -13,7 +13,7 @@ import { chromium } from "playwright";
 import { getDomain } from "tldts";
 import { jev } from "./jev.mjs";
 import { ENUMERATE } from "./page-script.mjs";
-import { FIELDISH, SELECTISH, FILEISH, brief, likelyFor, phrasesFrom, plainGoal, goalMet, pageDiff, repeatedElements, formatPage, clipMiddle, optionSummary, numbersIn, kindsOf, countKind, mayCount } from "./page-model.mjs";
+import { FIELDISH, SELECTISH, FILEISH, brief, likelyFor, phrasesFrom, plainGoal, goalMet, mentions, pageDiff, repeatedElements, formatPage, clipMiddle, optionSummary, numbersIn, kindsOf, countKind, mayCount } from "./page-model.mjs";
 import { readBlocks, toText, passages, findPassages } from "./reader.mjs";
 import { commitsSomething, COMMITTING_TOOLS } from "./safety.mjs";
 import { forJev, resolveValue, autofillAccount } from "./secrets.mjs";
@@ -1500,6 +1500,18 @@ export class Barq {
         act.value = await this.chooseText(page, goal, act.el).catch(() => null);
         if (act.value == null) act.tool = "click";      // nothing in the goal fits: open the field instead
         else { r.tool = act.tool; r.text_from_goal = act.value; echoedGoal = true; }
+      }
+      // A goal that names an option in so many words does not need the dropdown read out: if
+      // exactly one of the options is that word, it is the one meant, and a wrong guess is
+      // impossible because anything less than an exact single match falls through to asking.
+      if (act.tool === "select" && act.el?.options?.length && act.value == null) {
+        const said = `${goal} ${Object.values(values).join(" ")}`;
+        const named = act.el.options.filter(o => String(o).trim().length > 1 && mentions(said, String(o).trim()));
+        if (named.length === 1) {
+          act.value = named[0];
+          act.optionIndex = act.el.options.indexOf(named[0]);
+          r.option_from_goal = named[0];
+        }
       }
       if (act.tool === "select" && act.el?.options?.length && act.value == null) {
         // A dropdown that can't be read or answered is a failed action the next round sees, not an

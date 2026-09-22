@@ -206,10 +206,11 @@ export function plainGoal(goal, values = {}) {
 const escaped = s => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 // A single word has to be a word where it is found: "tick" is not shown by "sticker". Anything
 // longer is distinctive enough to match as it stands.
-const holds = (text, want) => {
+export const mentions = (text, want) => {
   const hay = String(text ?? "").toLowerCase(), needle = String(want).toLowerCase().trim();
   if (!hay || needle.length < 2) return false;
-  if (/\s/.test(needle)) return hay.includes(needle);
+  // the whole phrase has to stand on its own where it is found, however many words it has:
+  // "Option 2" is not shown by "Option 280", and "tick" is not shown by "sticker"
   return new RegExp(`(^|[^\\p{L}\\p{N}])${escaped(needle)}([^\\p{L}\\p{N}]|$)`, "u").test(hay);
 };
 
@@ -220,17 +221,17 @@ export function goalMet(plain, page, changed = null) {
   const { kind, wants } = plain;
   const els = page.elements ?? [];
   if (kind === "type") {
-    const shows = w => els.some(e => FIELDISH(e) && holds(e.value, w));
+    const shows = w => els.some(e => FIELDISH(e) && mentions(e.value, w));
     return (plain.all ? wants.every(shows) : wants.some(shows)) ? true : null;
   }
   if (kind === "choose") {
-    const chosen = els.some(e => wants.some(w => (SELECTISH(e) && holds(e.value, w))
-      || (e.active === true && (holds(e.text, w) || holds(e.label, w)))
-      || (e.checked === true && (holds(e.text, w) || holds(e.label, w)))));
+    const chosen = els.some(e => wants.some(w => (SELECTISH(e) && mentions(e.value, w))
+      || (e.active === true && (mentions(e.text, w) || mentions(e.label, w)))
+      || (e.checked === true && (mentions(e.text, w) || mentions(e.label, w)))));
     return chosen ? true : null;
   }
   if (kind === "tick") {
-    const ticked = els.some(e => e.checked === true && wants.some(w => holds(e.label, w) || holds(e.text, w) || holds(e.near, w)));
+    const ticked = els.some(e => e.checked === true && wants.some(w => mentions(e.label, w) || mentions(e.text, w) || mentions(e.near, w)));
     return ticked ? true : null;
   }
   // Something was made, so the page has to hold something it did not hold before. What was typed
@@ -239,7 +240,7 @@ export function goalMet(plain, page, changed = null) {
   if (kind === "create") {
     if (!changed) return null;
     const arrived = [...(changed.added ?? []), changed.new_text ?? ""].join(" | ");
-    return wants.some(w => holds(arrived, w)) ? true : null;
+    return wants.some(w => mentions(arrived, w)) ? true : null;
   }
   // Opening something means the address moved to it. Without that, a goal naming the site it is
   // already on ("open the Wikipedia article about X") would be satisfied by the domain it started
