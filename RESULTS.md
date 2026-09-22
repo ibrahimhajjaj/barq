@@ -60,6 +60,18 @@ waiting for pages; Jev's own share is 300 to 400 ms a call.
 | the goal's own words as typing, one question per page | **41/41** | 0 | 4.68 s | 203.2 s | 194 | 349 |
 | the page answers for a plain goal, question during settle | **41/41** | 0 | 4.17 s | 184.1 s | 186 | 334 |
 | dropdown options and one-prompt tasks (43 tasks) | **43/43** | 0 | 4.65 s | 225.0 s | 199 | 368 |
+| a finished step is not stuck (51 tasks, see below) | **51/51** | 0 | 4.22 s | 237.3 s | 219 | 365 |
+
+The last row is a wider set: `npm run bench` also picks up `bench/tasks.local.mjs`, seven live-site
+tasks kept out of the published set (a Wikipedia article in Arabic, two GitHub navigations, an MDN
+page, two pages of a product's own site, a plugin directory search). Against the 43 tasks the row
+above it shares, two statuses moved and nothing else: `drag` from `likely_done` to `done` in the
+same four calls, and `ti-sort-table` from `done` to `likely_done` in one call fewer. It is the run
+behind two changes to the loop: a round where Jev has nothing left to do, after the step has
+already acted, now answers `likely_done` rather than `stuck`, and the stricter question asked
+before either stopped asking whether the page has nothing left to offer and started asking whether
+what the goal asked for has happened. The first was found by another session driving a shop: "add
+both X and Y to the cart" came back `stuck` three times out of three with both items in the cart.
 
 A task or two moves between runs of the same code: live sites and the model's scores near a
 threshold both vary. Read one run's 38 against another's 39 as noise, not progress. In the last run
@@ -107,7 +119,9 @@ Every task passed in the latest run, but these are the ones that have failed bef
   finished. Flaky by design of the page.
 - **`todomvc-coarse`** and **`webform-fine`** fail now and then on a "done" score sitting right at
   the threshold (0.33 against 0.35). Both return a status the caller can act on; neither has ever
-  claimed a false `done`.
+  claimed a false `done`. A score under that threshold no longer ends the step on its own: the
+  stricter question is asked first, and a step that has acted and has nothing left to do comes back
+  `likely_done` for the caller to verify.
 
 ## Guard tests
 
