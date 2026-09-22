@@ -177,6 +177,7 @@ const PLAIN_GOALS = [
   [/^\s*(?:please\s+)?(?:choose|select|pick)\b/iu, "choose"],
   [/^\s*(?:please\s+)?(?:open|go to|navigate to|visit)\b/iu, "open"],
   [/^\s*(?:please\s+)?(?:tick|check|mark)\b/iu, "tick"],
+  [/^\s*(?:please\s+)?(?:add|create|submit|post|insert|save)\b/iu, "create"],
 ];
 // more than one thing to do, so the page showing one of them proves nothing
 const COMPOUND = /\b(?:then|after that|and then)\b|,\s*(?:then|and)\b|\band\s+(?:\w+\s+)?(?:continue|submit|save|send|open|click|press|choose|select|confirm|apply|search|go)\b/iu;
@@ -184,6 +185,7 @@ const COMPOUND = /\b(?:then|after that|and then)\b|,\s*(?:then|and)\b|\band\s+(?
 export function plainGoal(goal, values = {}) {
   const text = String(goal ?? "");
   if (!text || COMPOUND.test(text)) return null;
+  if (mayCount(text)) return null;          // a goal that counts is settled by counting, not by this
   const hit = PLAIN_GOALS.find(([re]) => re.test(text));
   if (!hit) return null;
   const kind = hit[1];
@@ -213,7 +215,7 @@ const holds = (text, want) => {
 
 // Whether the page now shows what a plain goal asked for. true means finished, null means the page
 // cannot say, and null is what keeps the question honest: only a clear yes skips it.
-export function goalMet(plain, page) {
+export function goalMet(plain, page, changed = null) {
   if (!plain) return null;
   const { kind, wants } = plain;
   const els = page.elements ?? [];
@@ -230,6 +232,14 @@ export function goalMet(plain, page) {
   if (kind === "tick") {
     const ticked = els.some(e => e.checked === true && wants.some(w => holds(e.label, w) || holds(e.text, w) || holds(e.near, w)));
     return ticked ? true : null;
+  }
+  // Something was made, so the page has to hold something it did not hold before. What was typed
+  // showing up in a row that has just appeared is a record; the same words sitting in the box they
+  // were typed into are not.
+  if (kind === "create") {
+    if (!changed) return null;
+    const arrived = [...(changed.added ?? []), changed.new_text ?? ""].join(" | ");
+    return wants.some(w => holds(arrived, w)) ? true : null;
   }
   if (kind === "open") {
     const slug = w => w.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, "");

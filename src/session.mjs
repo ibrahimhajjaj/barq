@@ -1349,7 +1349,8 @@ export class Barq {
       if (counting) await this.count(counting, page, goal);
 
       // something has been done and the page now shows what the goal asked for: no need to ask
-      if (plain && round > 0 && history.slice(before).some(h => h.action) && goalMet(plain, page) === true) {
+      const sinceLast = round > 0 && prevPage ? pageDiff(prevPage, page) : null;
+      if (plain && round > 0 && history.slice(before).some(h => h.action) && goalMet(plain, page, sinceLast) === true) {
         status = "done";
         info = `the page shows it: ${plain.kind} ${plain.wants[0]}`;
         rounds.push({ round, checked_in_page: plain.wants[0] });
