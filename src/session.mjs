@@ -1447,11 +1447,24 @@ export class Barq {
       if (act.tool === "none") {
         // content that arrives late (a modal, a slow render): look once more before giving up
         if (round === 0 && !retried) { retried = true; rounds.pop(); round--; await sleep(1500); continue; }
-        if (round > 0 && done >= 0.35 && a.error.noul < 0.5 && a.blocked.noul < 0.5) {
-          // nothing left to do, but "done" is soft: the caller is the one to confirm it
-          status = "likely_done";
-          info = "no further action seems needed but Jev is unsure the goal is met; verify with a check, snapshot or screenshot";
-          break;
+        if (round > 0 && a.error.noul < 0.5 && a.blocked.noul < 0.5) {
+          // "nothing left to do" and "the goal is met" are two questions, and the second one is
+          // soft here: when it is very soft the stricter question is worth asking, because a goal
+          // that names two things ("add both X and Y") reads as unfinished on a page that shows
+          // neither of them in its words, however plainly the buttons say otherwise.
+          if (done < 0.35) {
+            r.confirm = await this.looksFinished(page, goal, history);
+            log(`     confirm=${r.confirm}`);
+            if (r.confirm >= 0.65) { status = "done"; break; }   // the stricter question agrees
+          }
+          // It acted, and now there is nothing left to do. That is a step whose result the caller
+          // has to confirm, not a step going in circles, and calling it stuck sends them off to
+          // redo work the page has already taken.
+          if (history.some(h => h.action && h.action !== "wait")) {
+            status = "likely_done";
+            info = "no further action seems needed but Jev is unsure the goal is met; verify with a check, snapshot or screenshot";
+            break;
+          }
         }
         status = a.blocked.noul >= 0.5 ? "blocked" : "stuck";
         break;
