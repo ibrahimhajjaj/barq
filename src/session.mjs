@@ -355,8 +355,11 @@ export class Barq {
     this.breakFlow();
     this.lastActionAt = t0;
     await this.page.goto(url, { timeout: 30_000, waitUntil: "commit" });
-    this.lastActionEnd = Date.now();
     await this.page.waitForLoadState("domcontentloaded", { timeout: 15_000 }).catch(() => { /* read the page as it is */ });
+    // The watch for late work starts when the document is ready, not when the response arrived: an
+    // entry ad, a cookie wall or a consent banner is scheduled from the page's own load, and a
+    // first look taken before it lands decides against a page that is still being built.
+    this.lastActionEnd = Date.now();
     await this.settle();
     const r = { url: this.page.url(), title: await this.page.title(), ms: Date.now() - t0 };
     // Some sites serve an empty page to headless or automated browsers, and settle() can't tell
