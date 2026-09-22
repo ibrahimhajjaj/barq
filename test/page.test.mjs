@@ -149,7 +149,16 @@ test("a goal that says plainly what it wants is checked against the page, and an
   // a choice shows in the control, a tick shows in the box, an address shows in the url
   assert.equal(goalMet(plainGoal("Choose Two in the dropdown", {}), { elements: [{ tag: "select", options: ["One", "Two"], value: "Two" }] }), true);
   assert.equal(goalMet(plainGoal("Tick the Remember box", {}), { elements: [{ tag: "input:checkbox", checked: true, label: "Stickers" }] }), null, "a word has to be a word, not part of one");
-  assert.equal(goalMet(plainGoal("Open the page about incompleteness theorems", {}), { url: "https://x.test/wiki/Incompleteness_theorems", title: "", elements: [] }), true);
+  // opening something means the address moved to it: the site's own name in the address it started
+  // on proves nothing, which is how a goal like "open the Wikipedia article about X" was once
+  // satisfied by the word Wikipedia in en.wikipedia.org before anything had happened
+  const opening = plainGoal("Open the Wikipedia article about incompleteness theorems", {});
+  const onTheArticle = { url: "https://en.wikipedia.org/wiki/Incompleteness_theorems", title: "", elements: [] };
+  const stillHome = { url: "https://en.wikipedia.org/wiki/Main_Page", title: "Wikipedia", elements: [] };
+  const moved = { url: "https://en.wikipedia.org/wiki/Main_Page -> https://en.wikipedia.org/wiki/Incompleteness_theorems" };
+  assert.equal(goalMet(opening, onTheArticle, moved), true);
+  assert.equal(goalMet(opening, onTheArticle, null), null, "no move, no proof");
+  assert.equal(goalMet(opening, stillHome, moved), null, "the site's own name is not the thing asked for");
 
   // something made is something the page did not hold before: the words sitting in the box they
   // were typed into are not a new row

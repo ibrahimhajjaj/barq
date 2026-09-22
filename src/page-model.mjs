@@ -241,10 +241,16 @@ export function goalMet(plain, page, changed = null) {
     const arrived = [...(changed.added ?? []), changed.new_text ?? ""].join(" | ");
     return wants.some(w => holds(arrived, w)) ? true : null;
   }
+  // Opening something means the address moved to it. Without that, a goal naming the site it is
+  // already on ("open the Wikipedia article about X") would be satisfied by the domain it started
+  // from, on a page where nothing has happened yet.
   if (kind === "open") {
-    const slug = w => w.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, "");
-    const address = `${page.url} ${page.title}`.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, "");
-    return wants.some(w => slug(w).length >= 6 && address.includes(slug(w))) ? true : null;
+    if (!changed?.url) return null;
+    const slug = w => String(w).toLowerCase().replace(/[^\p{L}\p{N}]+/gu, "");
+    const [from] = String(changed.url).split(" -> ");
+    const was = slug(from), now = slug(`${page.url} ${page.title}`);
+    // what the address gained, not what it already had: the site's own name is in both
+    return wants.some(w => slug(w).length >= 10 && now.includes(slug(w)) && !was.includes(slug(w))) ? true : null;
   }
   return null;
 }
