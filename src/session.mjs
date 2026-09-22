@@ -86,7 +86,12 @@ export const ACCEPT_DIALOGS = function acceptEveryDialog() { return true; };
 const MAX_SINGLE = 240;   // a choice takes 255 criteria at most; the rest of the room is kept free
 const HIGHLIGHT_MS = Number(process.env.BARQ_HIGHLIGHT_MS ?? 150);
 // How long after an action ends settle() keeps watching, for work the page starts a moment later
+// How long after an action ends the page is still watched for work it started late. A click can
+// navigate or fetch and deserves the full watch; keystrokes, a key press and a hover land where
+// they are and almost never set anything else off, so waiting on them is waiting for nothing.
 const POST_ACTION_MS = 350;
+const BRIEF_WATCH_MS = 120;
+const LANDS_QUIETLY = new Set(["type", "press_key", "hover"]);
 // The first request of a process answers about half a second slower than the ones after it, by the
 // API's own timing rather than ours. Asking it something trivial while the first page is still
 // loading means the caller never pays for that.
@@ -239,6 +244,7 @@ export class Barq {
     this.frameIds = new WeakMap(); this.nextFrameId = 1;
     this.callSignal = null;          // set by a caller that can time out or cancel the current call
     this.crashed = false;
+    this.lateWatchMs = POST_ACTION_MS;   // how long the page is watched after the last action
     this.progress = null;        // what a step in flight has done, for a caller that gives up first
     this.page = page;
     this.ready = this.adopt(page);
@@ -334,7 +340,7 @@ export class Barq {
           const now = Date.now();
           idle = Math.min(idle, now - this.lastChangeAt);
           const afterAction = this.lastActionEnd ? now - this.lastActionEnd : Infinity;
-          const domWait = now < domEnd ? Math.max(quiet - idle, POST_ACTION_MS - afterAction, 0) : 0;
+          const domWait = now < domEnd ? Math.max(quiet - idle, (this.lateWatchMs ?? POST_ACTION_MS) - afterAction, 0) : 0;
           const counted = [...this.inflight.values()].filter(q => q.at >= since && now - q.at < q.young);
           const netPending = now < netEnd && counted.length > 0;
           const popupPending = popupAt > this.popupArrivedAt && now - popupAt < 3000;
@@ -367,6 +373,7 @@ export class Barq {
     // The watch for late work starts when the document is ready, not when the response arrived: an
     // entry ad, a cookie wall or a consent banner is scheduled from the page's own load, and a
     // first look taken before it lands decides against a page that is still being built.
+    this.lateWatchMs = POST_ACTION_MS;
     this.lastActionEnd = Date.now();
     await this.settle();
     const r = { url: this.page.url(), title: await this.page.title(), ms: Date.now() - t0 };
@@ -736,6 +743,7 @@ export class Barq {
   // or long typing doesn't use up that watch.
   async act(act) {
     const t = Date.now(); this.lastActionAt = t;
+    this.lateWatchMs = LANDS_QUIETLY.has(act.tool) ? BRIEF_WATCH_MS : POST_ACTION_MS;
     try { await this.perform(act); }
     finally { this.lastActionEnd = Date.now(); }
     return Date.now() - t;
