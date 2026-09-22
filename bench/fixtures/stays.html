@@ -1,0 +1,86 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Stays</title>
+<style>
+  body { font: 15px/1.5 system-ui; margin: 24px; max-width: 720px }
+  .row { display: flex; gap: 12px; align-items: center; margin: 10px 0 }
+  .card { border: 1px solid #ddd; border-radius: 8px; padding: 10px 12px; margin: 8px 0 }
+  .muted { color: #666 }
+  [hidden] { display: none }
+</style>
+
+<h1>Stays</h1>
+
+<form id="search" class="row">
+  <label>Destination <input id="where" type="search" placeholder="City"></label>
+  <label>Category
+    <select id="category">
+      <option>All stays</option>
+      <option>Design</option>
+      <option>Nature</option>
+      <option>Coastal</option>
+    </select>
+  </label>
+  <label><input id="refundable" type="checkbox"> Free cancellation</label>
+  <button type="submit">Find stays</button>
+</form>
+
+<p id="summary" class="muted">Search a city to see what is available.</p>
+<div id="results"></div>
+
+<section id="detail" hidden>
+  <h2 id="name"></h2>
+  <p id="blurb"></p>
+  <button id="back">← All stays</button>
+</section>
+
+<script>
+  const STAYS = [
+    { name: "Casa Flora", city: "Lisbon", category: "Design", refundable: true, blurb: "A tiled townhouse near the river." },
+    { name: "Quinta do Vale", city: "Lisbon", category: "Nature", refundable: true, blurb: "Orchards above the valley." },
+    { name: "Baixa Rooms", city: "Lisbon", category: "Design", refundable: false, blurb: "Small rooms over a bakery." },
+    { name: "Praia Alta", city: "Porto", category: "Coastal", refundable: true, blurb: "Dunes and a long beach." },
+    { name: "Ribeira Loft", city: "Porto", category: "Design", refundable: false, blurb: "A loft on the quay." },
+  ];
+
+  const results = document.querySelector("#results");
+  const summary = document.querySelector("#summary");
+  const detail = document.querySelector("#detail");
+
+  document.querySelector("#search").addEventListener("submit", event => {
+    event.preventDefault();
+    const city = document.querySelector("#where").value.trim().toLowerCase();
+    const category = document.querySelector("#category").value;
+    const refundable = document.querySelector("#refundable").checked;
+    const found = STAYS.filter(s => (!city || s.city.toLowerCase() === city)
+      && (category === "All stays" || s.category === category)
+      && (!refundable || s.refundable));
+
+    // rendered a moment late, the way a results list usually arrives
+    summary.textContent = "Searching…";
+    results.innerHTML = "";
+    setTimeout(() => {
+      summary.textContent = `${found.length} stay${found.length === 1 ? "" : "s"} found`;
+      results.innerHTML = found.map(s => `<div class="card"><strong>${s.name}</strong>
+        <span class="muted">${s.city} · ${s.category}${s.refundable ? " · free cancellation" : ""}</span>
+        <button data-name="${s.name}">View ${s.name}</button></div>`).join("");
+    }, 250);
+  });
+
+  results.addEventListener("click", event => {
+    const name = event.target.dataset.name;
+    if (!name) return;
+    const stay = STAYS.find(s => s.name === name);
+    document.querySelector("#name").textContent = stay.name;
+    document.querySelector("#blurb").textContent = stay.blurb;
+    detail.hidden = false;
+    results.hidden = true;
+    document.querySelector("#search").hidden = true;
+  });
+
+  document.querySelector("#back").addEventListener("click", () => {
+    detail.hidden = true;
+    results.hidden = false;
+    document.querySelector("#search").hidden = false;
+  });
+</script>

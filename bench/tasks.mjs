@@ -5,6 +5,7 @@
 import { fileURLToPath } from "node:url";
 
 const SITE_TI = "https://the-internet.herokuapp.com";
+const FIXTURE = name => new URL(`fixtures/${name}`, import.meta.url).href;
 const FILE_UPLOAD_TXT = fileURLToPath(new URL("./fixtures/upload.txt", import.meta.url));
 
 const step = (goal, opts = {}) => ({ goal, ...opts });
@@ -89,6 +90,14 @@ export const TASKS = [
   ]),
   // A goal that names what it wants without naming where to type it, on a page whose own domain
   // carries one of the goal's words. Both of those have produced a wrong "done" before.
+  // One prompt, four things to do, and a results list that arrives a moment late: the shape a
+  // browser agent is usually shown off with, and the one that costs us the most rounds.
+  task("stays-filter", "form", FIXTURE("stays.html"), [
+    step("Use the destination search and filters to find Design stays in Lisbon with free cancellation, then open Casa Flora.", {
+      maxActions: 15,
+      assert: "() => !document.querySelector('#detail').hidden && document.querySelector('#name').innerText === 'Casa Flora'",
+    })
+  ]),
   task("wiki-search-open", "large-page", "https://en.wikipedia.org/wiki/Main_Page", [
     step("Open the Wikipedia article about Gödel's incompleteness theorems.", { assert: "() => location.pathname.includes('incompleteness')" })
   ]),
