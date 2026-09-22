@@ -57,13 +57,13 @@ test("a step that finished is recorded, and repeated on the same page it replays
   assert.equal(r.recipe, "recorded");
 
   await b.page.setContent(TODO);
-  // the same score after two actions of its own would end the step, so it must end it after a replay
+  // a replay is never taken on trust: what it did has to show on the page. Here the goal says
+  // plainly what it makes, so the page answers for itself and nothing is asked at all.
   const n = jev(b, () => finished(0.8));
   r = await b.do("Add the todo", { values: { text: "buy milk" } });
   assert.equal(r.status, "done", r.info);
   assert.equal(r.recipe, "replayed");
-  assert.deepEqual([n.decide, n.call], [1, 0]);
-  assert.ok(n.changes[0], "the round after the replay sees what its last action changed");
+  assert.deepEqual([n.decide, n.call], [0, 0], "the page showed the new item, so no question was needed");
   assert.deepEqual(r.actions.map(h => `${h.action} ${h.value ?? ""}`.trim()), ["type text", "click"]);
   assert.deepEqual(await items(b), ["buy milk"]);
 });
@@ -461,7 +461,8 @@ test("recipe: false neither replays nor records", async t => {
   const n = jev(b, addTodo);
   let r = await b.do("Add the todo", { values: { text: "buy milk" }, recipe: false });
   assert.equal(r.recipe, undefined);
-  assert.equal(n.decide, 3);
+  // two actions, and then the page itself shows the item rather than a round being spent on it
+  assert.equal(n.decide, 2);
   r = await b.do("Add the todo again", { values: { text: "walk the dog" }, recipe: false });
   assert.equal(r.status, "done", r.info);
   assert.equal(readFileSync(file, "utf8"), before);

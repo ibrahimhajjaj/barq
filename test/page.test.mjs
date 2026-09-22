@@ -151,6 +151,17 @@ test("a goal that says plainly what it wants is checked against the page, and an
   assert.equal(goalMet(plainGoal("Tick the Remember box", {}), { elements: [{ tag: "input:checkbox", checked: true, label: "Stickers" }] }), null, "a word has to be a word, not part of one");
   assert.equal(goalMet(plainGoal("Open the page about incompleteness theorems", {}), { url: "https://x.test/wiki/Incompleteness_theorems", title: "", elements: [] }), true);
 
+  // something made is something the page did not hold before: the words sitting in the box they
+  // were typed into are not a new row
+  const adding = plainGoal("Add a todo item", { todo: "buy milk" });
+  assert.equal(adding.kind, "create");
+  assert.equal(goalMet(adding, { elements: [{ tag: "input:text", value: "buy milk" }] }, { added: [], new_text: "" }), null);
+  assert.equal(goalMet(adding, { elements: [] }, { added: ['input:checkbox "Toggle" near "buy milk"'], new_text: "buy milk" }), true);
+  assert.equal(goalMet(adding, { elements: [] }, null), null, "with nothing to compare against, nothing is proved");
+
+  // a goal that counts keeps the counting path, which counts in code already
+  assert.equal(plainGoal("Add elements until there are exactly 3 Delete buttons", {}), null);
+
   // and a goal nobody could check this way says so rather than guessing
   assert.equal(plainGoal("Make the table sorted by last name", {}), null);
 });
