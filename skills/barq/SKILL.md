@@ -20,7 +20,10 @@ need to read page dumps unless a step hands control back to you.
    picks which value goes where.
 4. Get information with `browser_read` and a `question`: it returns just the passages that answer
    it, from the whole page. Without a question it returns the page text a page at a time.
-5. Confirm side effects with `browser_check` (a yes/no probability) before moving on. One thing per
+5. Confirm side effects with `browser_check` (a yes/no probability) before moving on. When the
+   question isn't yes or no but which of a few things is true ("is the order pending, shipped or
+   delivered?"), `browser_choose` takes the options and answers with one of them and a probability
+   for each. It can't invent an option, so give every one you would accept. One thing per
    question: "is X on, and does Y say Z" lands near 0.5 even when both halves are true, so ask it as
    two checks. ≥0.85 is a reliable yes, ≤0.15 a reliable no, and the middle means look for yourself.
    On a page that keeps its own history (a chat thread, an activity feed, a build log) ask
@@ -52,7 +55,9 @@ the page) or `selector`, and `click_until_gone` for a "load more" button. If it 
   the user to log in in their browser.
 - `error`: the page shows an error; read `page_text`.
 - `ambiguous`, `stuck`, `max_actions`: take over. `browser_snapshot` lists numbered elements,
-  and `browser_act` acts on one directly. Then go back to `browser_do`.
+  and `browser_act` acts on one directly. Take the snapshot first: the numbers belong to the page
+  it listed, and `browser_act` refuses a number this session never saw listed rather than act on
+  whatever now sits at it. Then go back to `browser_do`.
 - `blocked`: captcha or access denied. Tell the user.
 - `timeout`: the step ran out of time (`timeout_s`, default 90). `actions` shows what was done.
 
@@ -92,6 +97,10 @@ would rather never be asked, `BARQ_ATTACH=own` works in a browser barq keeps to 
 starts with none of their logins.
 
 ## When something goes wrong
+
+`browser_screenshot` gives you the page as a picture (the viewport, or `full_page`), for showing
+the user what you are looking at or for a layout problem the text can't carry. It is not how you
+read a page: `browser_read` and `browser_snapshot` are.
 
 Each `browser_do` result has a `trace` path: a JSON file with every round's decision and
 probabilities. Read it to see why a step went the way it did. `explain: true` puts the rounds in
