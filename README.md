@@ -67,11 +67,15 @@ pays, sends or deletes: ask the user, then call again with `allow_irreversible`)
 1. Open `chrome://inspect/#remote-debugging` (Edge: `edge://inspect/#remote-debugging`) and tick
    **Allow remote debugging for this browser instance**.
 2. Set the browser to `edge` or `chrome` (plugin setting, or `BARQ_ATTACH=edge`).
-3. The browser asks **Allow remote debugging?** once. A small relay process keeps that approved
-   connection and shares it with every agent session, so you aren't asked on each restart. It lets
-   go after 30 idle minutes (`BARQ_RELAY_IDLE_MIN`). While it runs, a program running as you that
-   reads its token file (your account only) can drive the browser, as any approved debugging
-   connection can; `BARQ_RELAY=0` turns the relay off and the prompt comes back every time.
+3. The browser asks **Allow remote debugging?** once. Ticking the box in step 1 starts the
+   browser's debugging server; it doesn't let anyone in, so each new connection is still announced.
+   A small relay process keeps that one approved connection and shares it with every agent session,
+   so you are asked once per browser run and not on each restart. It waits as long as you take to
+   click, and holds the connection for eight idle hours (`BARQ_RELAY_IDLE_MIN`) because the browser
+   only shows its "controlled by automated test software" bar while it is open, which is cheaper
+   than finding the prompt again. While it runs, a program running as you that reads its token file
+   (your account only) can drive the browser, as any approved debugging connection can;
+   `BARQ_RELAY=0` turns the relay off and the prompt comes back every time.
 4. Optional: load the `extension/` folder unpacked (Extensions → Developer mode → Load unpacked).
    Then barq's tabs live in one collapsed group named after your project instead of a separate
    window. Tabs it opens close when it is done, and your tab stays in front.

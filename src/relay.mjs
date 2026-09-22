@@ -10,6 +10,7 @@
 // away without closing them (a server that was killed). It exits when the browser goes away, or
 // after `idle` with no client connected.
 import http from "node:http";
+import net from "node:net";
 import crypto from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
@@ -18,9 +19,11 @@ import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { WebSocket, WebSocketServer } from "ws";
 
-// The browser shows its "controlled by automated software" bar while the connection is open, so it
-// isn't kept for long once nobody uses it.
-const IDLE_MS = Number(process.env.BARQ_RELAY_IDLE_MIN ?? 30) * 60_000;
+// The browser shows its "controlled by automated software" bar while the connection is open, so
+// keeping it costs the user that bar. Letting it go costs a prompt they have to notice and click,
+// and a prompt raised while nobody is at the machine strands the work that raised it. The bar is
+// the cheaper of the two, so the connection is held for a working day rather than half an hour.
+const IDLE_MS = Number(process.env.BARQ_RELAY_IDLE_MIN ?? 480) * 60_000;
 const MAX_MESSAGE = 512 * 1024 * 1024;   // screenshots and page captures can be large
 
 export function stateDir({ platform = process.platform, env = process.env, home = os.homedir() } = {}) {
@@ -35,19 +38,41 @@ export function stateFile(upstream, dir = stateDir()) {
   return path.join(dir, `relay-${crypto.createHash("sha256").update(upstream).digest("hex").slice(0, 16)}.json`);
 }
 
-// The user may take a while to answer the browser's prompt; giving up early would only raise
-// a fresh prompt on the next try.
-const ANSWER_MS = 10 * 60_000;
+// How often the wait below checks that the browser is still there.
+const BROWSER_CHECK_MS = 5000;
+
+// Is anything still listening where the browser said its debugging endpoint is?
+const reachable = (port, host, timeout = 1000) => new Promise(resolve => {
+  const s = net.connect({ port, host });
+  const done = ok => { s.destroy(); resolve(ok); };
+  s.setTimeout(timeout, () => done(false));
+  s.once("connect", () => done(true));
+  s.once("error", () => done(false));
+});
 
 // Serve `upstream` (the browser's ws:// endpoint). Resolves once connected and listening, with
 // { url, close }; rejects when the browser refuses or the user doesn't allow the connection.
 
 export async function startRelay(upstream, { idleMs = IDLE_MS, onExit = () => {}, log = () => {} } = {}) {
-  const up = new WebSocket(upstream, { perMessageDeflate: false, maxPayload: MAX_MESSAGE, handshakeTimeout: ANSWER_MS });
+  const up = new WebSocket(upstream, { perMessageDeflate: false, maxPayload: MAX_MESSAGE });
+  // This connection is the only thing holding the browser's "Allow remote debugging" prompt on
+  // screen, so there is no deadline on it: dropping it would take the prompt away with it, and a
+  // click that came a minute later would land on nothing while the next attempt raised a fresh
+  // prompt. The wait ends when the user answers, or when the browser itself is gone.
   await new Promise((resolve, reject) => {
-    up.once("open", resolve);
-    up.once("error", reject);
-    up.once("unexpected-response", (req, res) => reject(new Error(`the browser answered ${res.statusCode}`)));
+    const at = new URL(upstream);
+    const host = at.hostname.replace(/^\[|\]$/g, "");
+    const port = +at.port || (at.protocol === "wss:" ? 443 : 80);
+    let watch;
+    const settle = fn => value => { clearInterval(watch); fn(value); };
+    watch = setInterval(async () => {
+      if (await reachable(port, host)) return;
+      up.terminate();
+      settle(reject)(new Error("the browser went away before the connection was allowed"));
+    }, BROWSER_CHECK_MS);
+    up.once("open", settle(resolve));
+    up.once("error", settle(reject));
+    up.once("unexpected-response", (req, res) => settle(reject)(new Error(`the browser answered ${res.statusCode}`)));
   });
 
   const token = crypto.randomBytes(24).toString("base64url");
@@ -254,7 +279,7 @@ export async function relayEndpoint(upstream, { timeoutMs = 120_000, dir = state
     }
     await sleep(200);
   }
-  throw Object.assign(new Error("no answer to the browser's \"Allow remote debugging\" prompt yet"), { code: "RELAY_TIMEOUT" });
+  throw Object.assign(new Error("the browser's \"Allow remote debugging\" prompt hasn't been answered yet; it stays on screen and this connection keeps waiting for it"), { code: "RELAY_TIMEOUT" });
 }
 
 // node relay.mjs <upstream> <state file>
