@@ -57,6 +57,7 @@ waiting for pages; Jev's own share is 300 to 400 ms a call.
 | after the source rewrite | **41/41** | 0 | 4.64 s | 208.2 s | 203 | 379 |
 | hidden frames dropped, checks split in two | 38/41 | 0 | 4.51 s | 199.4 s | 191 | 353 |
 | diagnosable timeouts, passages keep their section | 40/41 | 0 | 4.58 s | 203.6 s | 200 | 329 |
+| the goal's own words as typing, one question per page | **41/41** | 0 | 4.68 s | 203.2 s | 194 | 349 |
 
 A task or two moves between runs of the same code: live sites and the model's scores near a
 threshold both vary. Read one run's 38 against another's 39 as noise, not progress. In the last run
