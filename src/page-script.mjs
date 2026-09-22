@@ -288,7 +288,14 @@ export const ENUMERATE = ({ start, frame }) => {   // start: the first number to
     url: location.href,
     title: document.title,
     text: textOnScreen(),
-    metrics: { scroll_y: Math.round(scrollY), page_height: document.documentElement.scrollHeight, text_length: wholePage.length },
+    metrics: {
+      scroll_y: Math.round(scrollY),
+      page_height: document.documentElement.scrollHeight,
+      // whether scrolling would reveal anything: offering the action when it would not is how a
+      // step ends up scrolling at the bottom of a page over and over
+      at_bottom: scrollY + innerHeight >= document.documentElement.scrollHeight - 2,
+      text_length: wholePage.length,
+    },
     dialogs: openDialogs(),
     elements,
     next,

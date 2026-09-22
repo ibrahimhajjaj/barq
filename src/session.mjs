@@ -555,8 +555,11 @@ export class Barq {
 
   // The questions asked every round, whatever size the page is. The wording is the prompt: change
   // one of these and the benchmark is the only thing that can say whether it was an improvement.
-  roundQuestions(jevValues) {
+  roundQuestions(jevValues, { atBottom = false } = {}) {
     const named = Object.keys(jevValues).length > 0;
+    // a page with nothing below the fold has nothing to scroll to, and an action that cannot
+    // change anything is an invitation to repeat it
+    const tools = atBottom ? Object.fromEntries(Object.entries(TOOLS).filter(([name]) => name !== "scroll")) : TOOLS;
     const withValues = named ? ", with the given `task.values`" : "";
     const questions = {
       done: { type: "noul", instructions: `Is there visible evidence in \`page.text\` and \`page.elements\` that \`task.goal\` has been achieved${withValues}?` },
@@ -580,20 +583,28 @@ export class Barq {
       ...(lastChange ? { last_change: lastChange } : {}),
       ...(count ? { count } : {}),
     };
-    const common = this.roundQuestions(Object.keys(values).length ? jevValues : {});
+    const common = this.roundQuestions(Object.keys(values).length ? jevValues : {}, { atBottom: !!page.metrics?.at_bottom });
     const targetQ = { type: "choice", instructions: "Which element in `page.elements`, given by its `i`, should the next step toward `task.goal` be taken on?" };
     const byNumber = els => Object.fromEntries(els.map(e => [String(e.i), null]));
 
-    // Small enough to ask about every element at once.
-    if (page.elements.length <= MAX_SINGLE && estimateTokens(JSON.stringify(page)) <= SINGLE_STAGE_TOKENS) {
-      targetQ.criteria = byNumber(page.elements);
-      const r = await this.call({ page, task }, page.elements.length ? { ...common, target: targetQ } : common);
-      return Object.assign({}, r.answers, { stages: 1 });
+    // One question covers the page when the elements fit the cap. A page a little over it is
+    // trimmed to the ones the goal is most likely to be about rather than split in two, since
+    // splitting costs a second call on every round for the rest of the step.
+    const asked = likelyFor(page.elements, goal, MAX_SINGLE);
+    // at_bottom is barq's own business, for deciding whether scrolling is worth offering; sending
+    // it would put a second, weaker opinion about "is there more" in front of the model
+    const { at_bottom, ...metrics } = page.metrics ?? {};
+    const shown = { ...page, metrics };
+    const onePage = asked === page.elements ? shown : { ...shown, elements: asked };
+    if (asked.length <= MAX_SINGLE && estimateTokens(JSON.stringify(onePage)) <= SINGLE_STAGE_TOKENS) {
+      targetQ.criteria = byNumber(asked);
+      const r = await this.call({ page: onePage, task }, { ...common, ...(asked.length ? { target: targetQ } : {}) });
+      return { ...r.answers, stages: 1, ...(asked.length < page.elements.length ? { elements_considered: asked.length } : {}) };
     }
 
     // Otherwise in two: which run of elements holds the answer, then which element in those runs.
     const groups = this.groupsOf(page.elements);
-    const outline = { url: page.url, title: page.title, text: page.text, metrics: page.metrics, dialogs: page.dialogs, groups };
+    const outline = { url: page.url, title: page.title, text: page.text, metrics, dialogs: page.dialogs, groups };
     const first = await this.call({ page: outline, task }, {
       ...common,
       group: { type: "choice", instructions: "Which entry of `page.groups` (by its `g`) contains the element the next action toward `task.goal` should act on? Each group summarises consecutive page elements.", criteria: byNumberedKeys(groups, "g") },
