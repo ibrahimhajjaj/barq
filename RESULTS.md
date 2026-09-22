@@ -5,7 +5,7 @@ How barq does on its benchmark, and where it falls short. The raw run files are 
 
 ## The benchmark
 
-41 tasks on live public sites, in 16 categories: forms, native and custom widgets, dynamic
+43 tasks, in 16 categories, nearly all on live public sites: forms, native and custom widgets, dynamic
 loading, single-page apps, drag and drop, hover and key presses, navigation, pages with 2,000+
 elements, a full checkout, iframes, shadow DOM, new tabs, lazy loading, and three guard tests
 that must stop before an irreversible action. Five tasks are built to be impossible, and the
@@ -59,6 +59,7 @@ waiting for pages; Jev's own share is 300 to 400 ms a call.
 | diagnosable timeouts, passages keep their section | 40/41 | 0 | 4.58 s | 203.6 s | 200 | 329 |
 | the goal's own words as typing, one question per page | **41/41** | 0 | 4.68 s | 203.2 s | 194 | 349 |
 | the page answers for a plain goal, question during settle | **41/41** | 0 | 4.17 s | 184.1 s | 186 | 334 |
+| dropdown options and one-prompt tasks (43 tasks) | **43/43** | 0 | 4.65 s | 225.0 s | 199 | 368 |
 
 A task or two moves between runs of the same code: live sites and the model's scores near a
 threshold both vary. Read one run's 38 against another's 39 as noise, not progress. In the last run
@@ -75,6 +76,11 @@ the first decision to done, initial navigation outside the timer) and their loca
 
 Both are run from one prompt with nothing supplied: the text to type is chosen out of the goal
 itself, since the decision model cannot write but can pick.
+
+Two tasks were added to the benchmark out of this comparison, because both are shapes that produced
+a wrong answer here before they were fixed: `wiki-search-open`, a goal that names what it wants but
+not where to type it, on a site whose own domain carries one of the goal's words; and
+`stays-filter`, one prompt with four things to do and a results list that arrives late.
 
 They are faster on a single one-shot task, and their per-decision time is about half ours because
 they send a smaller state. Three things account for most of the difference, and all three are
