@@ -904,18 +904,16 @@ test("a dropdown refilled while Jev chooses is a failed action, not a different 
 test("a dropdown whose options can't be read is a recorded action error, and the deadline still ends the step", { timeout: 20_000 }, async t => {
   const b = await Barq.launch({ browser }); t.after(() => b.close());
   await b.page.setContent(`<select><option>One</option><option>Two</option></select>`);
-  const el = (await b.snapshot()).elements[0];
-  b.decide = async () => {
-    // re-rendered after the snapshot: the element Jev picked is gone
-    await b.page.evaluate(() => { const s = document.querySelector('select'), c = s.cloneNode(true); c.removeAttribute('data-jev-i'); s.replaceWith(c); });
-    return { ...clickAnswers(el.i), tool: { choice: 'select', probabilities: { select: 1 } } };
-  };
+  const page = await b.snapshot();   // as it stands now
+  const el = page.elements[0];
   b.call = async () => assert.fail('no question without the options');
+  // re-rendered since the page was read: the element the answer named is not there any more
+  await b.page.evaluate(() => { const s = document.querySelector('select'), c = s.cloneNode(true); c.removeAttribute('data-jev-i'); s.replaceWith(c); });
   const t0 = Date.now();
-  let r = await b.do('Choose Two', { maxActions: 1 });
+  await assert.rejects(b.chooseOption(page, 'Choose Two', el), /options could not be read/);
   assert.ok(Date.now() - t0 < 6000, `${Date.now() - t0}ms`);
-  assert.equal(r.status, 'max_actions');
-  assert.match(r.actions[0].error, /options could not be read/);
+
+  let r;
 
   await b.page.setContent(`<select><option>One</option><option>Two</option></select>`);
   b.decide = async () => ({ ...clickAnswers(el.i), tool: { choice: 'select', probabilities: { select: 1 } } });
