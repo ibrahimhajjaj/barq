@@ -157,7 +157,15 @@ export const ENUMERATE = ({ start, frame }) => {   // start: the first number to
       || tidy(el.getAttribute("title"))
       || tidy(inner?.getAttribute?.("alt") || inner?.textContent);
     if (text) o.text = text;
-    const label = labelOf(el);
+    let label = labelOf(el);
+    // A calendar day shows a bare number and keeps the full date on something inside it. Without
+    // that date every month's 20th reads the same, so a short text takes the name of the one thing
+    // inside that is named with it.
+    if (!label && text && text.length <= 3) {
+      const named = [...el.querySelectorAll("[aria-label]")].map(e => e.getAttribute("aria-label"));
+      const word = new RegExp(`(^|\\W)${text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(\\W|$)`);
+      if (named.length === 1 && word.test(named[0])) label = tidy(named[0]);
+    }
     if (label && label !== text) o.label = label;
   };
 

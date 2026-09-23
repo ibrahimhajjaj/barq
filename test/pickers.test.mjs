@@ -1,4 +1,5 @@
-// Offline tests: fields that take their value from a list. No Jev calls.
+// Offline tests: fields that take their value from a list, and pickers that keep their own Done
+// button. No Jev calls.
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
 import { chromium } from "playwright";
@@ -22,6 +23,16 @@ const SUGGESTING = (attrs, options) => `<!doctype html><body>
     if (li) { field.value = li.textContent; field.dataset.chosen = "yes"; list.innerHTML = ""; }
   });
 </script></body>`;
+
+const PICKERS = `<!doctype html><body>
+<div role="dialog" id="calendar">
+  <div role="grid"><div role="gridcell" id="day" tabindex="0" style="cursor:pointer" onclick="this.dataset.picked = 1"><span aria-label="Tuesday, October 20, 2026">20</span></div></div>
+  <button id="done">Done</button>
+</div>
+<div role="dialog" id="plain"><input id="note"><button>OK</button></div>
+<div role="alertdialog" id="sure"><div role="option" id="choice">Keep</div><button>OK</button></div>
+<button id="close"><svg aria-label="Close dialog" width="10" height="10"></svg>x</button>
+</body>`;
 
 let browser, b;
 before(async () => {
@@ -58,4 +69,11 @@ test("a query box keeps what was typed rather than taking a suggested query", as
     assert.equal(got.value, "lisbon", attrs);
     assert.equal(got.chosen, null, attrs);
   }
+});
+
+test("a calendar day is listed with its date, and a short label that isn't one is left alone", async () => {
+  await b.page.setContent(PICKERS);
+  const page = await b.snapshot();   // as it stands now
+  assert.ok(page.elements.some(e => e.text === "20" && e.label === "Tuesday, October 20, 2026"));
+  assert.ok(page.elements.some(e => e.text === "x" && !e.label), "'x' is not a word of 'Close dialog'");
 });
