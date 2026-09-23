@@ -139,3 +139,15 @@ test("with every value typed, a 'type' aimed at a radio is a click on that radio
   // a value still to type keeps the rule that finds it a field
   assert.equal(b.resolve(page, answers, { text_input: "hello", other: "x" }, { entered: ["text_input"] }).tool, "type");
 });
+
+test("a field half under a box is scrolled out from under it before anything is typed", async () => {
+  await b.page.setContent(`<style>body { font-size: 16px; line-height: 1.5 } input { font-size: 16px; padding: 6px; }</style><div style="position: relative;"><div style="overflow-y: scroll; height:100px;">
+    <input id="id" type="text" placeholder="Id"/><br/><br/><input id="name" type="text" placeholder="Name"/><br/><br/><input id="subject" type="text" placeholder="Subject"/>
+    </div><div style="position: absolute; width: 300px; height: 50px; background-color: #cccccc; top: 67px"></div></div>
+    <script>
+      const n = document.getElementById("name");
+      n.addEventListener("input", () => { const r = n.getBoundingClientRect(); if (document.elementFromPoint(r.left + (r.width >> 1), r.top + (r.height >> 1)) !== n) n.value = ""; });
+    </script>`);
+  await b.typeInto(b.page.locator("#name"), { value: "Ada" }, { timeout: 4000 });
+  assert.equal(await b.page.inputValue("#name"), "Ada");
+});

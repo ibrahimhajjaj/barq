@@ -941,6 +941,7 @@ export class Barq {
     if (account !== null) return this.autofill(loc, account || this.loginAccount || "");
 
     const text = await resolveValue(act.value);
+    await this.uncover(loc);
     await loc.fill("", opts);
     // Keys go wherever the focus is, not to the field they were meant for. A page can move it the
     // moment the field is focused: a search box that opens its real search in an overlay, or a
@@ -969,6 +970,24 @@ export class Barq {
     // chosen now, while the list is open, rather than left for a later round that may never come.
     this.typedUnchosen = false;
     if (text && await this.offersList(loc)) this.typedUnchosen = !(await this.pickSuggestion(loc, text));
+  }
+
+  // A field half under something else (a banner, a box drawn over a scrolling list) gets keys the
+  // page may refuse: some pages clear what went into a field nobody could see. It is scrolled, in
+  // whatever box scrolls it, until nothing covers its middle, the way a person would bring it out.
+  uncover(loc) {
+    return loc.evaluate(el => {
+      const clear = () => {
+        const r = el.getBoundingClientRect();
+        const hit = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+        return hit === el || el.contains(hit);
+      };
+      for (const block of ["center", "end", "start", "nearest"]) {
+        if (clear()) return true;
+        el.scrollIntoView({ block, inline: "nearest" });
+      }
+      return clear();
+    }).catch(() => true);
   }
 
   // A field that shows a list of suggestions to pick from as you type. A query box is left out: its
