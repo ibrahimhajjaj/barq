@@ -60,6 +60,7 @@ function tool(fn, timeoutMs = 60_000) {
     let session;
     try {
       const name = args.session ?? "main";
+      if (args.isolated) await pool.isolate(name);
       const limit = typeof timeoutMs === "function" ? timeoutMs(args) : timeoutMs;
       const { result, recovered } = await pool.run(name, jb => { session = jb; return fn(jb, args); }, { timeoutMs: limit, signal: extra?.signal });
       if (result?.content) return result;
@@ -94,6 +95,7 @@ server.registerTool("browser_open", {   // go to an address
   description: "Navigate the session's tab to a URL and wait until the page settles. Starts the browser and the tab on first use.",
   inputSchema: {
     url: z.string().describe("Absolute URL"), session,
+    isolated: z.boolean().optional().describe("Give this session its own cookies and storage, so it can sign in as someone else than the other sessions. Starts it on a fresh tab; the browser barq starts only"),
     allowed_sites: z.array(z.string()).optional().describe("Keep this session to these sites (hosts; subdomains included) from now on. A page that tries to leave them is stopped and the step ends blocked"),
   },
 }, tool(async (b, { url, allowed_sites }) => {

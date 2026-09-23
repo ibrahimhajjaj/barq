@@ -109,3 +109,14 @@ test("closing a session closes only its tab", async () => {
   assert.ok(!pool.list().some(s => s.session === "e"));
   assert.equal((await pool.run("f", jb => jb.page.url())).result, `${base}/f`);
 });
+
+test("an isolated session keeps its own cookies; the others share theirs", async () => {
+  await pool.run("shop-a", async jb => { await jb.open(`${base}/login`); await jb.page.evaluate(() => { document.cookie = "who=alice; path=/"; }); });
+  await pool.isolate("shop-b");
+  const read = name => pool.run(name, async jb => { await jb.open(`${base}/home`); return jb.page.evaluate(() => document.cookie); });
+  assert.equal((await read("shop-b")).result, "", "the isolated session sees none of alice's");
+  await pool.run("shop-b", jb => jb.page.evaluate(() => { document.cookie = "who=bob; path=/"; }));
+  assert.equal((await read("shop-a")).result, "who=alice");
+  assert.equal((await read("shop-c")).result, "who=alice", "a session that isn't isolated shares the browser's");
+  assert.equal((await read("shop-b")).result, "who=bob");
+});

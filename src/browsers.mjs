@@ -354,7 +354,8 @@ export class AttachedBrowser {
     return fresh ?? find();
   }
 
-  async newTab({ session = "main" } = {}) {
+  async newTab({ session = "main", isolated = false } = {}) {
+    if (isolated) throw new Error("separate cookies per session work in the browser barq starts; in your own browser every session shares its sign-ins");
     // After a miss, look for the helper again only once a minute: each look can cost seconds.
     const tryGroup = this.placement === "group" || (this.placement === "auto" && Date.now() - this.helperMissedAt > 60_000);
     if (!tryGroup) return this.createTab(this.placement === "tab" ? [{ background: true }] : [{ newWindow: true, focus: false, ...this.size }, { background: true }]);
@@ -458,7 +459,17 @@ export class LaunchedBrowser {
 
   get name() { return "chromium"; }
   isAlive() { return !this.closed && (this.browser ? this.browser.isConnected() : true); }
-  newTab() { return this.context.newPage(); }
+
+  // An isolated session gets a context of its own: its own cookies and storage, so two sessions can
+  // be signed in to one site as different people. The context goes when its tab does.
+  async newTab({ isolated = false } = {}) {
+    if (!isolated) return this.context.newPage();
+    if (!this.browser) throw new Error("separate cookies per session need a browser barq starts without a profile directory; this one runs on a single profile, which every session shares");
+    const context = await this.browser.newContext({ viewport: this.context.pages()[0]?.viewportSize() ?? { width: 1280, height: 800 } });
+    const page = await context.newPage();
+    page.on("close", () => context.close().catch(() => {}));
+    return page;
+  }
 
   async dispose() {
     await this.context.close().catch(() => {});

@@ -44,8 +44,22 @@ export class SessionPool {
 
   entry(name) {
     let s = this.sessions.get(name);
-    if (!s) this.sessions.set(name, s = { name, jb: null, host: null, hadTab: false, lastUrl: null, queue: Promise.resolve(), busy: false, closed: false, stray: null });
+    if (!s) this.sessions.set(name, s = { name, jb: null, host: null, hadTab: false, lastUrl: null, queue: Promise.resolve(), busy: false, closed: false, stray: null, isolated: false });
     return s;
+  }
+
+  // From the next tab on, this session keeps its own cookies and storage. A session that already has
+  // a tab sharing the browser's gets a fresh one, signed in to nothing.
+  isolate(name) {
+    const s = this.entry(name);
+    // after whatever the session is doing now, never under it
+    const turn = s.queue.then(async () => {
+      if (s.isolated) return;
+      s.isolated = true;
+      if (s.jb) { await this.discard(s); s.hadTab = false; s.lastUrl = null; }
+    });
+    s.queue = turn.catch(() => {});
+    return turn;
   }
 
   // fn(jb, signal) -> result; signal aborts when the call times out or is cancelled.
@@ -111,7 +125,7 @@ export class SessionPool {
     if (s.jb && s.host === host && await this.responsive(s)) return false;
     const replacing = s.hadTab;
     await this.discard(s);
-    const page = await host.newTab({ session: s.name });
+    const page = await host.newTab({ session: s.name, isolated: s.isolated });
     s.jb = await Barq.forPage(page, { highlight: this.highlight, front: host.front ? p => host.front(p) : null, recipes: this.recipes });
     s.host = host; s.hadTab = true;
     if (replacing && s.lastUrl) await s.jb.open(s.lastUrl).catch(() => {});
