@@ -71,6 +71,16 @@ test("a query box keeps what was typed rather than taking a suggested query", as
   }
 });
 
+test("a picker's own Done is found for a control inside it, and never another dialog's OK", async () => {
+  await b.page.setContent(PICKERS);
+  const done = await b.unconfirmed(await b.page.$("#day"));
+  assert.equal(await done.evaluate(el => el.id), "done");
+  assert.equal(await b.unconfirmed(await b.page.$("#note")), null, "a dialog that picks nothing has no Done to press");
+  assert.equal(await b.unconfirmed(await b.page.$("#choice")), null, "an are-you-sure dialog is never answered for the user");
+  await b.page.evaluate(() => document.getElementById("calendar").remove());
+  assert.equal(await b.unconfirmed(done), null, "a picker that has closed has nothing left to confirm");
+});
+
 test("a calendar day is listed with its date, and a short label that isn't one is left alone", async () => {
   await b.page.setContent(PICKERS);
   const page = await b.snapshot();   // as it stands now

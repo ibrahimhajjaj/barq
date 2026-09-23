@@ -92,6 +92,10 @@ const HIGHLIGHT_MS = Number(process.env.BARQ_HIGHLIGHT_MS ?? 150);
 const POST_ACTION_MS = 350;
 const BRIEF_WATCH_MS = 120;
 const LANDS_QUIETLY = new Set(["type", "press_key", "hover"]);
+// A picker that opens as a dialog (a calendar, a list to choose from) and carries its own Done or
+// Apply button hasn't handed its value to the page until that button is pressed: the calendar shows
+// the chosen day while the form behind it is still empty.
+const CONFIRMS = /^(done|apply|ok)\b/i;
 // How long a field that offers a list as you type gets for that list to show up.
 const SUGGESTIONS_MS = 1500;
 // The first request of a process answers about half a second slower than the ones after it, by the
@@ -823,6 +827,36 @@ export class Barq {
     return false;
   }
 
+  // Press a picker's own button on the step's behalf, recorded like any other action.
+  async confirmPicker(button, history) {
+    const label = await button.evaluate(b => (b.innerText || b.getAttribute("aria-label") || "").trim().split("\n")[0].slice(0, 40)).catch(() => "Done");
+    const h = { action: "click", element: `button "${label}"`, confirms: "the picker the step chose in" };
+    try { this.lastActionAt = Date.now(); await button.click({ timeout: 4000 }); await this.settle(); }
+    catch (e) { h.error = actionError(e); }
+    finally { this.lastActionEnd = Date.now(); await button.dispose().catch(() => {}); }
+    history.push(h);
+  }
+
+  // The Done or Apply button of the picker dialog that `el` sits in, while that dialog is still
+  // open, or null. Only a dialog that picks things (it holds a grid or a list of options) counts:
+  // the OK of an "are you sure?" dialog is never pressed on the step's behalf.
+  async unconfirmed(el) {
+    if (!el) return null;
+    const found = await el.evaluateHandle((node, source) => {
+      if (!node.isConnected) return null;
+      const shown = e => { const r = e.getBoundingClientRect(); return r.width > 0 && r.height > 0; };
+      const box = node.closest('dialog[open], [role=dialog], [aria-modal="true"]');
+      if (!box || !shown(box) || box.getAttribute("role") === "alertdialog") return null;
+      if (!box.querySelector("[role=grid], [role=gridcell], [role=listbox], [role=option]")) return null;
+      const re = new RegExp(source, "i");
+      return [...box.querySelectorAll("button, [role=button]")]
+        .find(b => b !== node && shown(b) && re.test((b.innerText || b.getAttribute("aria-label") || "").trim())) ?? null;
+    }, CONFIRMS.source).catch(() => null);
+    const button = found?.asElement();
+    if (!button) await found?.dispose().catch(() => {});
+    return button ?? null;
+  }
+
   async selectOption(loc, act, opts) {
     if (act.optionIndex == null) {
       const label = String(act.value ?? "");
@@ -1426,10 +1460,12 @@ export class Barq {
       const dropped = typed && await typed.el.evaluate(el => el.isConnected && el.value === "" && !document.activeElement?.value).catch(() => false);
       if (dropped) history.push({ event: `the page emptied ${typed.label} after the focus moved on: type it again and choose from its list` });
       typed = null;
+      // a picker still open over the value the step chose, waiting for its Done button
+      const open = await this.unconfirmed(acted);
 
       // something has been done and the page now shows what the goal asked for: no need to ask
       const sinceLast = round > 0 && prevPage ? pageDiff(prevPage, page) : null;
-      if (plain && !unchosen && round > 0 && history.slice(before).some(h => h.action) && goalMet(plain, page, sinceLast) === true) {
+      if (plain && !open && !unchosen && round > 0 && history.slice(before).some(h => h.action) && goalMet(plain, page, sinceLast) === true) {
         status = "done";
         info = `the page shows it: ${plain.kind} ${plain.wants[0]}`;
         rounds.push({ round, checked_in_page: plain.wants[0] });
@@ -1445,7 +1481,7 @@ export class Barq {
       const r = this.roundRecord(round, a, act, page);
       let done = r.done;
       rounds.push(r);
-      if (unchosen && done >= doneAt) { done = 0; r.value_not_in = dropped ? "typed value dropped" : "typed, nothing chosen from its list"; }
+      if ((open || unchosen) && done >= doneAt) { done = 0; r.value_not_in = open ? "picker still open" : dropped ? "typed value dropped" : "typed, nothing chosen from its list"; }
       if (counting?.kind) {
         // where a goal counts, the count decides, not Jev's impression of the page
         const wanted = `wanted ${counting.cmp} ${counting.target}`;
@@ -1518,6 +1554,14 @@ export class Barq {
       if (act.tool === "none") {
         // content that arrives late (a modal, a slow render): look once more before giving up
         if (round === 0 && !retried) { retried = true; rounds.pop(); round--; await sleep(1500); continue; }
+        // Nothing left to choose in the picker, and its own button still to press: that button is
+        // what hands the chosen value to the page, so it is pressed rather than the step ending on
+        // a value the form never received.
+        if (open) {
+          await this.confirmPicker(open, history);
+          acted = null;
+          continue;
+        }
         if (dropped) {
           status = "stuck";
           info = "a value typed into a field with a list of suggestions was emptied by the page, and nothing that fits was on offer";
