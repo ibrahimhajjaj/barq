@@ -1068,3 +1068,17 @@ test("a link a router handles, with no href, is listed like any other link", asy
   assert.ok(els.some(e => e.text === "Settings"), JSON.stringify(els));
   await b2.close();
 });
+
+test("an upload button with no file input behind it gets the file through the picker it opens", async () => {
+  const b2 = await Barq.launch({ browser });
+  await b2.page.setContent(`<button id="up">Upload photo</button><script>
+    document.getElementById("up").addEventListener("click", () => {
+      const input = document.createElement("input"); input.type = "file";
+      input.onchange = () => { document.body.dataset.got = input.files[0].name; };
+      input.click();
+    });</script>`);
+  const [{ i }] = (await b2.snapshot()).elements;
+  await b2.perform({ tool: "upload", target: i, value: new URL(import.meta.url).pathname });
+  assert.equal(await b2.page.evaluate(() => document.body.dataset.got), "page.test.mjs");
+  await b2.close();
+});

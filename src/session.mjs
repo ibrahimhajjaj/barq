@@ -917,7 +917,11 @@ export class Barq {
       }
       case "upload": {
         if (act.value == null) throw new Error("an upload needs the path of a file");
-        return void await loc.setInputFiles(String(act.value), opts);
+        if (await loc.evaluate(el => el.matches("input[type=file]"), null, opts)) return void await loc.setInputFiles(String(act.value), opts);
+        // An "Upload" button that makes its own file input and clicks it: the picker it opens is
+        // answered instead, since there is no input on the page to hand the file to.
+        const [chooser] = await Promise.all([this.page.waitForEvent("filechooser", opts), loc.click(opts)]);
+        return void await chooser.setFiles(String(act.value), opts);
       }
       case "scroll": return void await this.page.mouse.wheel(0, 700);
       case "wait": return void await sleep(1000);
