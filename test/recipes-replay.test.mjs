@@ -700,3 +700,27 @@ test("a value Jev is unsure of, or two values claiming one field, are left to th
   await b.do("Fill in the sign-up form", { values, recipe: false });
   assert.deepEqual(typedPerRound, [0, 1], "nothing was filled in bulk; the round typed its one field");
 });
+
+test("an order placed once is not placed again when the step is run a second time", async t => {
+  const { b } = await session(t, `<p>Basket: 1 item</p><button onclick="document.body.dataset.orders = (+document.body.dataset.orders || 0) + 1">Place order</button>`);
+  const place = (page, history) => did(history, "Place order") ? finished(0.95) : answer({ target: el(page, e => e.text === "Place order"), irreversible: 0.9 });
+  jev(b, place);
+  let r = await b.do("Place the order", { recipe: false, allowIrreversible: true });
+  assert.equal(r.status, "done", r.info);
+  // the caller didn't see that answer (it timed out on their side) and asks again
+  r = await b.do("Place the order", { recipe: false, allowIrreversible: true });
+  assert.equal(r.status, "needs_confirmation");
+  assert.match(r.info, /already pressed in this session/);
+  assert.ok(r.pending.already_done_at);
+  assert.equal(await b.page.getAttribute("body", "data-orders"), "1", "one order, not two");
+});
+
+test("a different page's button of the same name is its own action", async t => {
+  const { b } = await session(t, "");
+  jev(b, (page, history) => did(history, "Send") ? finished(0.95) : answer({ target: el(page, e => e.text === "Send"), irreversible: 0.9 }));
+  const thread = n => `data:text/html,<title>thread ${n}</title><button onclick="document.body.dataset.sent = 1">Send</button>`;
+  await b.open(thread(1));
+  assert.equal((await b.do("Send it", { recipe: false, allowIrreversible: true })).status, "done");
+  await b.open(thread(2));
+  assert.equal((await b.do("Send it", { recipe: false, allowIrreversible: true })).status, "done");
+});

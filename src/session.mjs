@@ -178,6 +178,13 @@ function boundFields(page, answers, values) {
   return picks.filter(x => claimed.indexOf(x.el.i) === claimed.lastIndexOf(x.el.i));
 }
 
+const COMMIT_MEMORY_MS = 30 * 60_000;
+const firedAgain = (at, action, element) => ({
+  status: "needs_confirmation",
+  info: `${element} was already pressed in this session at ${new Date(at).toLocaleTimeString()}; pressing it again may do it twice (a second order, a second message). Check the page first; to repeat it on purpose, use browser_act`,
+  pending: { action, element, already_done_at: new Date(at).toISOString() },
+});
+
 // A goal about time sees each date on the page with how far it is from today.
 function datesCounted(page) {
   const counted = e => (e.text || e.label) ? { ...e, ...(e.text ? { text: annotateDates(e.text) } : {}), ...(e.label ? { label: annotateDates(e.label) } : {}) } : e;
@@ -867,6 +874,21 @@ export class Barq {
     };
   }
 
+  // Hard-to-undo actions already taken, marked on the control itself. The mark is made before the
+  // action runs, so a step cut short in the middle of it (a timeout, a dropped connection) still
+  // counts it as done, and a retry that lands on that same button asks instead of paying twice. A
+  // page loaded or drawn afresh has new controls and starts clean: a new basket, a new message.
+  // `null` when it is new, otherwise when it was done; `again` marks it without asking.
+  firedBefore(i, { again = false } = {}) {
+    return this.locate(i).evaluate((node, [now, again, memory]) => {
+      const fired = (window.__barqFired ??= new WeakMap());
+      const at = fired.get(node);
+      if (!again && at && now - at < memory) return at;
+      fired.set(node, now);
+      return null;
+    }, [Date.now(), again, COMMIT_MEMORY_MS]).catch(() => null);
+  }
+
   async narrowTarget(page, goal, values, history, act, answers) {
     const fits = { type: FIELDISH, select: SELECTISH, upload: FILEISH }[act.tool] ?? (() => true);
     const byI = new Map(page.elements.map(e => [String(e.i), e]));
@@ -1259,6 +1281,9 @@ export class Barq {
       };
     }
 
+    // the caller's own action is never refused for having been done before, but it is written down,
+    // so a later step doesn't do it a second time
+    if (allowIrreversible && GUARDED.has(action) && commitsSomething(el, action)) await this.firedBefore(el.i, { again: true });
     const onto = destination == null ? undefined : this.currentElement(destination, fresh).i;
     this.breakFlow();
     this.dialogPolicy = acceptDialog ? ACCEPT_DIALOGS : SAFE_DIALOGS;   // for this one action
@@ -1383,6 +1408,8 @@ export class Barq {
           pending: { action: step.tool, element: brief(el), ...(step.key ? { key: step.key } : {}), p_irreversible: step.irreversible ?? 0, ...(rule ? { because: `"${rule}"` } : {}) } };
         break;
       }
+      const firedAt = GUARDED.has(step.tool) && ((step.irreversible ?? 0) >= irreversibleAt || rule) ? await this.firedBefore(el?.i) : null;
+      if (firedAt) { run.stop = firedAgain(firedAt, step.tool, brief(el)); break; }
       const h = { action: step.tool, element: brief(el) };
       if (option) h.option = option.label;
       if (step.valueKey != null) h.value = step.valueKey;
@@ -1942,11 +1969,15 @@ export class Barq {
       }
       // Jev's judgment, and a rule on the control's own words for when that judgment is wrong
       const rule = GUARDED.has(act.tool) ? commitsSomething(act.el, act.tool) : null;
-      if (GUARDED.has(act.tool) && !allowIrreversible && (a.irreversible.noul >= irreversibleAt || rule)) {
+      const committing = GUARDED.has(act.tool) && (a.irreversible.noul >= irreversibleAt || rule);
+      if (committing && !allowIrreversible) {
         status = "needs_confirmation"; info = "the next action looks hard to undo; call again with allow_irreversible to go ahead";
         pending = { action: act.tool, element: brief(act.el), ...(act.key ? { key: act.key } : {}), p_irreversible: r.irreversible, ...(rule ? { because: `"${rule}"` } : {}) };
         break;
       }
+      const firedAt = committing && act.target != null ? await this.firedBefore(act.target) : null;
+      if (firedAt) { ({ status, info, pending } = firedAgain(firedAt, act.tool, brief(act.el))); break; }
+      if (committing) r.committed = true;
 
       lastTool = act.tool;
       const h = { action: act.tool, element: brief(act.el ?? null) };

@@ -56,6 +56,8 @@ keep to its Crawl-delay.
 - `needs_confirmation`: the next action pays, sends, posts or deletes. Ask the user. Only re-call
   with `allow_irreversible: true` if they say yes, with the same goal and values: the step goes on
   from where it stopped.
+  With `pending.already_done_at`, that action was already taken in this session: a retry would
+  do it twice. Check the page instead; repeat it only on the user's word, with `browser_act`.
 - `needs_login`: a sign-in wall and no credentials given. Pass credentials (see secrets) or ask
   the user to log in in their browser.
 - `error`: the page shows an error; read `page_text`.
