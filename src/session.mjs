@@ -687,16 +687,27 @@ export class Barq {
   // Jev answers "which action", "which element" and "which value" as separate questions. Put
   // together they can contradict each other, so this settles them into one action that the page
   // can actually take.
-  resolve(page, answers, values) {
+  resolve(page, answers, values, { typedInto = null } = {}) {
     const elementOf = new Map(page.elements.map(e => [String(e.i), e]));
     const ranked = answers.target ? Object.entries(answers.target.probabilities).sort(([, a], [, b]) => b - a) : [];
     let tool = answers.tool.choice;
     let [number, p] = ranked[0] ?? [null, 0];
+    let ruled = null;
+
+    // Enter straight after typing is what sends what was typed, so it goes to that field. Jev can be
+    // sure it wants Enter and unsure where, and a checkbox next to a new todo is not where: the text
+    // would sit in the box unsent while the step went on without it.
+    if (tool === "press_enter" && typedInto && !FIELDISH(elementOf.get(number))) {
+      const field = page.elements.find(e => FIELDISH(e) && brief(e) === typedInto);
+      // chosen by that rule rather than guessed, so Jev's doubt about where does not carry over
+      if (field) [number, p, ruled] = [String(field.i), 1, "the field just typed into"];
+    }
 
     // a tool that only works on a certain kind of element: take the likeliest one it can work on
     const worksOn = {
       type: FIELDISH,
-      press_enter: e => FIELDISH(e) || e.tag.startsWith("input"),
+      // a text field, or a button Enter presses; never a checkbox, radio or file input
+      press_enter: e => FIELDISH(e) || /^input:(submit|button|image|reset)$/.test(e?.tag ?? ""),
       select: SELECTISH,
       upload: FILEISH,
     }[tool];
@@ -738,6 +749,7 @@ export class Barq {
       valueKey,
       value: valueKey != null ? values[valueKey] : undefined,
       typeNeedsText,
+      ...(ruled ? { target_by: ruled } : {}),
       candidates: ranked.slice(0, 3).map(([i, prob]) => ({ i: +i, p: +prob.toFixed(2), el: brief(elementOf.get(i)) })),
     };
   }
@@ -1496,7 +1508,8 @@ export class Barq {
         : await this.decide(page, goal, values, history.slice(-12), round ? pageDiff(prevPage, page) : undefined, counting && this.countProgress(counting));
       if (stillThere) page = early;
       prevPage = page;
-      const act = this.resolve(page, a, values);   // the answers made into something to do
+      const previous = history.slice(before).filter(h => h.action).at(-1);
+      const act = this.resolve(page, a, values, { typedInto: previous?.action === "type" && !previous.error ? previous.element : null });
       const r = this.roundRecord(round, a, act, page);
       let done = r.done;
       rounds.push(r);

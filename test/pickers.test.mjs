@@ -97,3 +97,19 @@ test("a goal that ends by naming a button safe to press twice picks that button,
   assert.equal(b.buttonGoalEndsWith(page([{ text: "Search", disabled: true }]), "and search"), null);
   assert.equal(b.buttonGoalEndsWith(search, "Search for Lisbon, then open the first result"), null, "only the last clause counts");
 });
+
+test("Enter straight after typing goes to the field typed into, not a checkbox Jev leaned toward", () => {
+  const page = { elements: [
+    { i: 1, tag: "input:text", placeholder: "What needs to be done?" },
+    { i: 3, tag: "input:checkbox", label: "Toggle Todo" },
+    { i: 5, tag: "input:submit", text: "Add" },
+  ] };
+  const answers = target => ({ tool: { choice: "press_enter", probabilities: { press_enter: 0.97 } }, target: { probabilities: target } });
+  const typed = 'input:text "What needs to be done?"';
+  const r = b.resolve(page, answers({ 3: 0.55, 1: 0.27 }), { second: "walk the dog" }, { typedInto: typed });
+  assert.deepEqual([r.tool, r.target, r.p_target, r.target_by], ["press_enter", 1, 1, "the field just typed into"]);
+  // a button that sends the form is still somewhere Enter can go
+  assert.equal(b.resolve(page, answers({ 5: 0.8, 1: 0.1 }), {}, {}).target, 5);
+  // without typing just before, a checkbox is no place for Enter: the likeliest field takes it
+  assert.equal(b.resolve(page, answers({ 3: 0.6, 1: 0.3 }), {}, {}).target, 1);
+});
