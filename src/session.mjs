@@ -96,6 +96,8 @@ const LANDS_QUIETLY = new Set(["type", "press_key", "hover"]);
 // Apply button hasn't handed its value to the page until that button is pressed: the calendar shows
 // the chosen day while the form behind it is still empty.
 const CONFIRMS = /^(done|apply|ok)\b/i;
+// Buttons that do the same thing when pressed twice, which the goal may name as its last step.
+const REPEATABLE = new Set(["search", "find", "filter", "sort", "show", "refresh"]);
 // How long a field that offers a list as you type gets for that list to show up.
 const SUGGESTIONS_MS = 1500;
 // The first request of a process answers about half a second slower than the ones after it, by the
@@ -1318,6 +1320,19 @@ export class Barq {
     return +answers.complete.noul.toFixed(2);
   }
 
+  // The one button on the page that the goal's last clause names in so many words ("... and run the
+  // search" and a button called Search), or null. Only verbs that are harmless to repeat count: a
+  // second search re-runs the same search, where a second Submit or Apply sends something twice.
+  // Anything less than a single exact fit is null.
+  buttonGoalEndsWith(page, goal) {
+    const last = goal.split(/,|;|\bthen\b|\band\b/i).map(c => c.trim()).filter(Boolean).at(-1) ?? "";
+    const verbs = (last.toLowerCase().match(/[a-z]+/g) ?? []).filter(w => REPEATABLE.has(w));
+    const says = e => String(e.text ?? "").trim().toLowerCase();
+    const named = page.elements.filter(e => /^button|\[button\]/.test(e.tag) && !e.disabled
+      && verbs.some(v => says(e) === v || says(e).startsWith(`${v} `)));
+    return named.length === 1 ? named[0] : null;
+  }
+
   // Jev writes nothing, but it can pick, so a goal that names what to look for can still fill a
   // field the caller gave no value for: the goal's own phrases become the options. Returns the
   // text to type, or null when none of them is the thing.
@@ -1380,7 +1395,7 @@ export class Barq {
     let echoedGoal = false;
     const seen = new Map();
     // the element the last action went to, and a list field typed into without choosing from it
-    let acted = null, typed = null;
+    let acted = null, typed = null, pressedEnding = false;
     ({ prompt: this.promptText } = values);
     this.loginIntent(values);
     // The call right after this goal stopped for confirmation goes on with the same flow: a recipe
@@ -1535,6 +1550,17 @@ export class Barq {
           // taken as done.
           r.confirm = await this.looksFinished(page, goal, history);
           log(`     confirm=${r.confirm}`);
+          // Not finished, nothing chosen to do, and the goal ends by naming a button that is still
+          // on the page: that button is the part still to do. Pressed once, and never one whose
+          // words pay, send or delete.
+          const ending = act.tool === "none" && r.confirm < 0.65 && !pressedEnding ? this.buttonGoalEndsWith(page, goal) : null;
+          if (ending && !commitsSomething(ending)) {
+            pressedEnding = true;
+            const h = { action: "click", element: brief(ending), because: "the goal ends by naming it and the page is not finished" };
+            try { r.act_ms = await this.act({ tool: "click", target: ending.i }); } catch (e) { h.error = actionError(e); }
+            history.push(h);
+            continue;
+          }
           if (r.confirm < 0.65) { status = "likely_done"; info = "the page looks done but Jev is unsure; verify with a check, snapshot or screenshot"; break; }
         }
         status = "done"; break;

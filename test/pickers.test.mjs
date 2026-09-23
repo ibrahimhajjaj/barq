@@ -1,5 +1,5 @@
-// Offline tests: fields that take their value from a list, and pickers that keep their own Done
-// button. No Jev calls.
+// Offline tests: fields that take their value from a list, pickers that keep their own Done button,
+// and a goal that ends by naming a button. No Jev calls.
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
 import { chromium } from "playwright";
@@ -86,4 +86,14 @@ test("a calendar day is listed with its date, and a short label that isn't one i
   const page = await b.snapshot();   // as it stands now
   assert.ok(page.elements.some(e => e.text === "20" && e.label === "Tuesday, October 20, 2026"));
   assert.ok(page.elements.some(e => e.text === "x" && !e.label), "'x' is not a word of 'Close dialog'");
+});
+
+test("a goal that ends by naming a button safe to press twice picks that button, and only that", () => {
+  const page = els => ({ elements: els.map((e, i) => ({ i, tag: "button", ...e })) });
+  const search = page([{ text: "Search" }, { text: "Done. Search for one-way flights" }, { text: "Explore" }]);
+  assert.equal(b.buttonGoalEndsWith(search, "Set a one way trip to Lisbon, and run the search")?.text, "Search");
+  assert.equal(b.buttonGoalEndsWith(page([{ text: "Submit" }]), "Fill in the form and submit it"), null, "a second submit sends twice");
+  assert.equal(b.buttonGoalEndsWith(page([{ text: "Search" }, { text: "Search" }]), "then search"), null, "two that fit is no fit");
+  assert.equal(b.buttonGoalEndsWith(page([{ text: "Search", disabled: true }]), "and search"), null);
+  assert.equal(b.buttonGoalEndsWith(search, "Search for Lisbon, then open the first result"), null, "only the last clause counts");
 });
