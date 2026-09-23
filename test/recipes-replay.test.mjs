@@ -753,3 +753,33 @@ test("a Submit that leaves the page where it was is still left for the caller to
   const r = await sentForm(t, { stays: true });
   assert.equal(r.status, "likely_done", r.info);
 });
+
+const CAPTCHA = `<title>Verify</title><p>Select all squares with traffic lights</p><button>Verify</button>`;
+const shopOrWall = (page, history) => {
+  if (did(history, "Add to basket")) return finished(0.95);
+  const add = page.elements.find(e => e.text === "Add to basket");
+  return add ? answer({ target: add.i }) : { ...answer({ tool: "none" }), blocked: { noul: 0.95 } };
+};
+
+test("a captcha in a browser someone can see is put in front of them, and the step goes on once they're past it", async t => {
+  const { b } = await session(t, CAPTCHA);
+  const seen = [];
+  b.front = async () => { seen.push("front"); return async () => seen.push("back"); };
+  jev(b, shopOrWall);
+  // the person solves it a moment later
+  setTimeout(() => b.page.setContent(`<button onclick="this.textContent='Added'">Add to basket</button>`).catch(() => {}), 4000);
+  const r = await b.do("Add the item to the basket", { recipe: false, waitForUserS: 20 });
+  assert.equal(r.status, "done", r.info);
+  assert.deepEqual(seen, ["front", "back"], "brought forward once, given back when the step ended");
+  assert.ok(r.actions.some(h => h.event?.includes("got past the check")));
+});
+
+test("a captcha nobody can see is handed back with how to let a person in; nothing waits", async t => {
+  const { b } = await session(t, CAPTCHA);
+  jev(b, shopOrWall);
+  const started = Date.now();
+  const r = await b.do("Add the item to the basket", { recipe: false, waitForUserS: 20 });
+  assert.equal(r.status, "blocked");
+  assert.match(r.info, /BARQ_ATTACH/);
+  assert.ok(Date.now() - started < 8000);
+});

@@ -66,7 +66,9 @@ keep to its Crawl-delay.
   it listed, and `browser_act` refuses a number this session never saw listed rather than act on
   whatever now sits at it. Then go back to `browser_do`.
 - `blocked`: captcha or access denied, or (with `allowed_sites`) the page tried to leave the sites
-  the session was kept to. Tell the user.
+  the session was kept to. Tell the user. For a captcha, calling again with `wait_for_user_s` (say
+  120) puts the tab in front of the user in their own browser and waits for them to get past it;
+  barq never solves one itself.
 - `timeout`: the step ran out of time (`timeout_s`, default 90). `actions` shows what was done.
 
 For work on pages you don't trust, pass `allowed_sites` to `browser_open`: the session then stays on

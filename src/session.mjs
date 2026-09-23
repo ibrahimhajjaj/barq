@@ -273,7 +273,7 @@ export class Barq {
       throw e;
     }
     const b = new Barq(context.pages()[0] ?? await context.newPage(), { context, browser: chrome, ownContext: true, ownBrowser: launchedBrowser, recipes });
-    b.highlight = highlight;
+    b.highlight = highlight; b.visible = headed;
     await b.ready;
     return b;
   }
@@ -282,9 +282,9 @@ export class Barq {
   // Everything this installs is scoped to that tab and the tabs it opens, never to the context,
   // because in an attached browser the context is the user's own profile.
   // front: brings a background tab forward for a moment and returns the undo (see autofill)
-  static async forPage(page, { highlight = false, front = null, recipes = null } = {}) {
+  static async forPage(page, { highlight = false, front = null, visible = false, recipes = null } = {}) {
     const b = new Barq(page, { recipes });
-    b.highlight = highlight; b.front = front;
+    b.highlight = highlight; b.front = front; b.visible = visible;
     await b.ready;
     return b;
   }
@@ -1065,6 +1065,30 @@ export class Barq {
     return loc.selectOption({ index: act.optionIndex, label }, opts);
   }
 
+  blockedInfo(waitForUserS) {
+    if (!(this.front || this.visible)) return "a captcha or check only a person can pass, in a browser nobody can see; run barq in your own browser (BARQ_ATTACH) or headed (BARQ_HEADED=1) and pass wait_for_user_s";
+    return waitForUserS ? "nobody got past the check in time; it is still in the tab" : "a captcha or check only a person can pass; call again with wait_for_user_s and it is put in front of the user to solve";
+  }
+
+  // A captcha is for a person, and barq never answers one. In a browser someone can see, the tab
+  // is put in front of them and the step waits, up to `seconds` over the whole step, for the page
+  // to change. It stays in front until the step ends, so the person isn't pulled away mid-check.
+  async waitForPerson(seconds) {
+    if (!seconds || !(this.front || this.visible)) return false;
+    this.personUntil ??= Date.now() + seconds * 1000;
+    if (Date.now() >= this.personUntil) return false;
+    const look = () => this.page.evaluate(() => location.href + "|" + (document.body?.innerText ?? "").slice(0, 2000)).catch(() => "");
+    const was = await look();
+    if (this.front && !this.heldFront) this.heldFront = await this.front(this.page).catch(() => null) ?? (() => {});
+    this.events.push("put in front of the user to get past a check only a person can pass");
+    while (Date.now() < this.personUntil) {
+      await sleep(1000);
+      if (this.abort?.signal.aborted || this.callSignal?.aborted) return false;
+      if (await look() !== was) { await this.settle({ max: 4000 }); return true; }
+    }
+    return false;
+  }
+
   // A "checking your browser" page usually lets a real browser through by itself within a few
   // seconds. Calling that blocked sends the caller away from a site that was about to open, so it is
   // given up to 8 seconds to clear, once per step. True when the page moved on.
@@ -1611,7 +1635,7 @@ export class Barq {
   }
 
   // recipe: false neither replays nor records for this call.
-  async runGoal(goal, { values = {}, maxActions = 10, doneAt = 0.5, minTarget = 0.3, allowIrreversible = false, irreversibleAt = 0.6, log = () => {}, recipe = true } = {}) {
+  async runGoal(goal, { values = {}, maxActions = 10, doneAt = 0.5, minTarget = 0.3, allowIrreversible = false, irreversibleAt = 0.6, waitForUserS = 0, log = () => {}, recipe = true } = {}) {
     const t0 = Date.now(), calls0 = this.stats.calls, tokens0 = this.stats.tokens;
     this.pageErrors.length = 0;
     const history = [], rounds = [];
@@ -1857,7 +1881,12 @@ export class Barq {
           history.push({ event: "a browser check cleared by itself" });
           continue;
         }
+        if (a.blocked.noul >= 0.5 && await this.waitForPerson(waitForUserS)) {
+          history.push({ event: "the person at the browser got past the check" });
+          continue;
+        }
         status = a.blocked.noul >= 0.5 ? "blocked" : "stuck";
+        if (status === "blocked") info = this.blockedInfo(waitForUserS);
         break;
       }
       // a captcha or a wall, not something to click through, unless it is the kind that lets the
@@ -1867,7 +1896,12 @@ export class Barq {
           history.push({ event: "a browser check cleared by itself" });
           continue;
         }
-        status = "blocked"; break;
+        if (await this.waitForPerson(waitForUserS)) {
+          history.push({ event: "the person at the browser got past the check" });
+          continue;
+        }
+        status = "blocked"; info = this.blockedInfo(waitForUserS);
+        break;
       }
 
       if (act.tool === "wait") {
@@ -2045,6 +2079,7 @@ export class Barq {
       status = "timeout"; info = "the step ran out of time; see actions for what was done";
     }
     this.shown = page;
+    await this.heldFront?.(); this.heldFront = null; this.personUntil = null;
     for (const event of this.events.splice(0)) history.push({ event });
     const out = {
       status, goal,

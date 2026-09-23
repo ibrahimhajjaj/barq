@@ -127,18 +127,19 @@ server.registerTool("browser_do", {   // one outcome, Jev choosing each action
     max_actions: z.number().int().min(1).max(30).optional().describe("Actions allowed in this step. Default 10"),
     timeout_s: z.number().int().min(5).max(600).optional().describe("Time limit for the whole step. Default 90"),
     allow_irreversible: z.boolean().optional().describe("Go ahead with actions that are hard to undo: ordering, paying, sending, deleting"),
+    wait_for_user_s: z.number().int().min(0).max(300).optional().describe("If a captcha or a check only a person can pass comes up, put the tab in front of the user and wait up to this long for them to get past it. barq never solves one itself"),
     explain: z.boolean().optional().describe("Put Jev's probabilities for every round in the result"),
     recipe: z.boolean().optional().describe("Replay what finished this goal on this page before, and record what finishes it now. Default true"),
     session,
   },
-}, tool(async (b, { goal, values, max_actions, timeout_s, allow_irreversible, explain, recipe, session: name }) => {
-  const r = await b.do(goal, { values: values ?? {}, maxActions: max_actions ?? 10, timeoutMs: (timeout_s ?? 90) * 1000, allowIrreversible: !!allow_irreversible, log: stderrLog, recipe: recipe !== false });
+}, tool(async (b, { goal, values, max_actions, timeout_s, allow_irreversible, wait_for_user_s, explain, recipe, session: name }) => {
+  const r = await b.do(goal, { values: values ?? {}, maxActions: max_actions ?? 10, timeoutMs: ((timeout_s ?? 90) + (wait_for_user_s ?? 0)) * 1000, allowIrreversible: !!allow_irreversible, waitForUserS: wait_for_user_s ?? 0, log: stderrLog, recipe: recipe !== false });
   const trace = traces.write("do", { ...r, values: Object.keys(values ?? {}), model: b.stats.model }, { session: name ?? "main", values });
   const out = stepEnvelope(r, { explain });
   if (trace) out.trace = trace;
   Object.assign(out, await siteToolNames(b));
   return out;
-}, ({ timeout_s }) => ((timeout_s ?? 90) + 30) * 1000));
+}, ({ timeout_s, wait_for_user_s }) => ((timeout_s ?? 90) + (wait_for_user_s ?? 0) + 30) * 1000));
 
 server.registerTool("browser_check", {   // a yes/no about the page
   title: "Check page",

@@ -243,6 +243,7 @@ const PROCESS_ID = `${process.pid}-${Math.random().toString(36).slice(2, 8)}`;
 //   "tab"    a plain background tab in the user's current window
 //   "auto"   "group" when the helper extension is installed, otherwise "window"
 export class AttachedBrowser {
+  visible = true;   // the user's own browser, in front of them
   kind = "attach";
 
   static async connect(spec = "auto", { placement = "auto", group = {}, size = { width: 1280, height: 800 }, allowTimeoutMs = 120_000 } = {}) {
@@ -457,18 +458,19 @@ export class LaunchedBrowser {
     try {
       if (userDataDir) {
         const context = await chromium.launchPersistentContext(userDataDir, { headless: !headed, channel, viewport, slowMo, args });
-        return new LaunchedBrowser(null, context);
+        return new LaunchedBrowser(null, context, { headed });
       }
       const browser = await chromium.launch({ headless: !headed, channel, slowMo, args });
-      return new LaunchedBrowser(browser, await browser.newContext({ viewport }));
+      return new LaunchedBrowser(browser, await browser.newContext({ viewport }), { headed });
     } catch (e) {
       if (/Executable doesn't exist/i.test(String(e.message)) && !channel) throw new Error("Chromium for Playwright is not installed. Run: npx playwright install chromium");
       throw e;
     }
   }
 
-  constructor(browser, context) {
+  constructor(browser, context, { headed = false } = {}) {
     this.browser = browser; this.context = context; this.closed = false;
+    this.visible = headed;   // someone can see its windows
     context.on("close", () => { this.closed = true; });
   }
 

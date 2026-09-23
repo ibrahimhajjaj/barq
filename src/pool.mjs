@@ -126,7 +126,7 @@ export class SessionPool {
     const replacing = s.hadTab;
     await this.discard(s);
     const page = await host.newTab({ session: s.name, isolated: s.isolated });
-    s.jb = await Barq.forPage(page, { highlight: this.highlight, front: host.front ? p => host.front(p) : null, recipes: this.recipes });
+    s.jb = await Barq.forPage(page, { highlight: this.highlight, front: host.front ? p => host.front(p) : null, visible: !!host.visible, recipes: this.recipes });
     s.host = host; s.hadTab = true;
     if (replacing && s.lastUrl) await s.jb.open(s.lastUrl).catch(() => {});
     return replacing;
