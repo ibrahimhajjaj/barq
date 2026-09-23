@@ -60,12 +60,16 @@ waiting for pages; Jev's own share is 300 to 400 ms a call.
 | the goal's own words as typing, one question per page | **41/41** | 0 | 4.68 s | 203.2 s | 194 | 349 |
 | the page answers for a plain goal, question during settle | **41/41** | 0 | 4.17 s | 184.1 s | 186 | 334 |
 | dropdown options and one-prompt tasks (43 tasks) | **43/43** | 0 | 4.65 s | 225.0 s | 199 | 368 |
-| a finished step is not stuck (51 tasks, see below) | **51/51** | 0 | 4.22 s | 237.3 s | 219 | 365 |
-| list fields, calendars, a stricter finish (53 tasks) | **53/53** | 0 | 4.23 s | 285.9 s | 258 | 349 |
+| a finished step is not stuck (50 tasks, see below) | **50/50** | 0 | 4.24 s | 233.6 s | 217 | 362 |
+| list fields, calendars, a stricter finish (52 tasks) | **52/52** | 0 | 4.24 s | 282.0 s | 256 | 348 |
 
-The last row is a wider set: `npm run bench` also picks up `bench/tasks.local.mjs`, seven live-site
-tasks kept out of the published set (a Wikipedia article in Arabic, two GitHub navigations, an MDN
-page, two pages of a product's own site, a plugin directory search). Against the 43 tasks the row
+The last two rows are a wider set: `npm run bench` also picks up `bench/tasks.local.mjs`, live-site
+tasks kept out of the published set. In the 50-task row that is seven of them (a Wikipedia article
+in Arabic, two GitHub navigations, an MDN page, two pages of a product's own site, a plugin directory
+search). Each task is counted once: the
+local set also listed `hn-comments`, which is in the published set, so the raw run files hold it
+twice and total 51 and 53. That duplicate is out of the local set now. In both rows the 43
+published tasks, the ones anyone can re-run, were all correct. Against the 43 tasks the row
 above it shares, two statuses moved and nothing else: `drag` from `likely_done` to `done` in the
 same four calls, and `ti-sort-table` from `done` to `likely_done` in one call fewer. It is the run
 behind two changes to the loop: a round where Jev has nothing left to do, after the step has
@@ -74,7 +78,7 @@ before either stopped asking whether the page has nothing left to offer and star
 what the goal asked for has happened. The first was found by another session driving a shop: "add
 both X and Y to the cart" came back `stuck` three times out of three with both items in the cart.
 
-The 53-task row adds two Google Flights tasks to the local set, one goal in a single sentence
+The 52-task row adds two Google Flights tasks to the local set, one goal in a single sentence
 and the same trip as five steps. Both failed before it: a city typed into a field that only takes a
 value picked from its suggestions was thrown away when the focus moved on, the calendar listed every
 month's 20th as "20", its date only reached the form through the calendar's own Done button, and a
