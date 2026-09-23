@@ -415,3 +415,20 @@ test("a new tab that is slow to report its address is still found, by the id the
     await host.dispose();
   } finally { await chrome.stop(); }
 });
+
+test("attached: an isolated session gets cookies of its own, apart from the user's profile", async () => {
+  const chrome = await startBrowser();
+  try {
+    const host = await AttachedBrowser.connect(chrome.dir, { placement: "tab" });
+    const shared = await host.newTab({ session: "main" });
+    await shared.goto(`${base}/`);
+    await shared.evaluate(() => { document.cookie = "who=user; path=/"; });
+    const apart = await host.newTab({ session: "other-account", isolated: true });
+    await apart.goto(`${base}/`);
+    assert.equal(await apart.evaluate(() => document.cookie), "", "none of the profile's cookies");
+    await apart.evaluate(() => { document.cookie = "who=second; path=/"; });
+    assert.equal(await shared.evaluate(() => document.cookie), "who=user", "and it leaves the profile's alone");
+    await apart.close();
+    await host.dispose();
+  } finally { await chrome.stop(); }
+});

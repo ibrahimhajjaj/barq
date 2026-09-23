@@ -356,7 +356,7 @@ export class AttachedBrowser {
   }
 
   async newTab({ session = "main", isolated = false } = {}) {
-    if (isolated) throw new Error("separate cookies per session work in the browser barq starts; in your own browser every session shares its sign-ins");
+    if (isolated) return this.isolatedTab();
     // After a miss, look for the helper again only once a minute: each look can cost seconds.
     const tryGroup = this.placement === "group" || (this.placement === "auto" && Date.now() - this.helperMissedAt > 60_000);
     if (!tryGroup) return this.createTab(this.placement === "tab" ? [{ background: true }] : [{ newWindow: true, focus: false, ...this.size }, { background: true }]);
@@ -426,6 +426,40 @@ export class AttachedBrowser {
       throw new Error("the new tab never showed up");
     }
     throw lastError;
+  }
+
+  // A tab in a browser context of its own: the user's browser keeps it apart from their profile,
+  // with its own cookies and storage, like a private window. It opens in the background, never in
+  // front of the user, and the context goes when the tab does.
+  async isolatedTab() {
+    this.cdp ??= this.browser.newBrowserCDPSession();
+    const cdp = await this.cdp;
+    const { browserContextId } = await cdp.send("Target.createBrowserContext", { disposeOnDetach: true });
+    const marker = `#jev-${Math.random().toString(36).slice(2, 10)}`;
+    const tries = [{ newWindow: true, focus: false, background: true, ...this.size }, { background: true }];
+    let targetId, lastError;
+    for (const opts of tries) {
+      try { ({ targetId } = await cdp.send("Target.createTarget", { url: `about:blank${marker}`, browserContextId, ...opts })); break; }
+      catch (e) { lastError = e; }
+    }
+    if (!targetId) { await cdp.send("Target.disposeBrowserContext", { browserContextId }).catch(() => {}); throw lastError; }
+    // A private context needs a window of its own, and some browsers open it in front whatever
+    // they are asked. It holds only this tab, so it is minimized at once: the user keeps their
+    // window, and the agent works on in this one (focus is emulated for its tabs).
+    const { windowId } = await cdp.send("Browser.getWindowForTarget", { targetId }).catch(() => ({}));
+    if (windowId != null) await cdp.send("Browser.setWindowBounds", { windowId, bounds: { windowState: "minimized" } }).catch(() => {});
+    const deadline = Date.now() + 20_000;
+    while (Date.now() < deadline) {
+      const page = this.browser.contexts().flatMap(c => c.pages()).find(p => !this.owned.has(p) && p.url().endsWith(marker))
+        ?? await this.pageWithTarget(targetId);
+      if (page) {
+        page.once("close", () => cdp.send("Target.disposeBrowserContext", { browserContextId }).catch(() => {}));
+        return this.own(page);
+      }
+      await sleep(50);
+    }
+    await cdp.send("Target.disposeBrowserContext", { browserContextId }).catch(() => {});
+    throw new Error("the new tab never showed up");
   }
 
   async pageWithTarget(targetId) {
