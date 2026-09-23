@@ -626,3 +626,40 @@ test("a session kept to one site doesn't follow a link off it, and says so", asy
   assert.equal(b.page.url(), home, "the tab stayed on the allowed site");
   await assert.rejects(b.open(`http://localhost:${server.address().port}/`), /outside the sites this session may visit/);
 });
+
+test("Jev split between look-alikes is asked again among just those before the step gives up", async t => {
+  const { b } = await session(t, `<h2>Billing</h2><a href="#" onclick="document.body.dataset.opened='billing'">Edit</a>
+    <h2>Shipping</h2><a href="#" onclick="document.body.dataset.opened='shipping'">Edit</a>`);
+  const n = jev(b, (page, history) => {
+    if (history.some(h => h.action === "click")) return finished(0.95);
+    const [billing, shipping] = page.elements.filter(e => e.text === "Edit").map(e => e.i);
+    return { ...answer({ target: billing }), target: { probabilities: { [billing]: 0.26, [shipping]: 0.25 } } };
+  });
+  let narrowed = null;
+  b.call = async (state, questions) => {
+    n.call++;
+    if (!questions.target) return { answers: { complete: { noul: 0.9 }, q: { noul: 0.1 } } };
+    narrowed = state.page.elements.map(e => e.under);
+    const shipping = state.page.elements.find(e => e.under === "Shipping").i;
+    return { answers: { target: { choice: String(shipping), probabilities: { [shipping]: 0.9, [state.page.elements.find(e => e.under === "Billing").i]: 0.1 } } } };
+  };
+  const r = await b.do("Edit the shipping address", { recipe: false });
+  assert.equal(r.status, "done", r.info);
+  assert.deepEqual(narrowed?.sort(), ["Billing", "Shipping"], "only the two it was split between were offered, each with its heading");
+  assert.equal(await b.page.getAttribute("body", "data-opened"), "shipping");
+});
+
+test("still split after asking again, the step stops as ambiguous", async t => {
+  const { b } = await session(t, `<a href="#">Edit</a><a href="#">Edit</a>`);
+  const n = jev(b, page => {
+    const [x, y] = page.elements.map(e => e.i);
+    return { ...answer({ target: x }), target: { probabilities: { [x]: 0.26, [y]: 0.25 } } };
+  });
+  b.call = async (state, questions) => {
+    n.call++;
+    const [x, y] = state.page.elements.map(e => e.i);
+    return { answers: questions.target ? { target: { choice: String(x), probabilities: { [x]: 0.52, [y]: 0.48 } } } : { complete: { noul: 0.9 } } };
+  };
+  const r = await b.do("Edit it", { recipe: false });
+  assert.equal(r.status, "ambiguous");
+});

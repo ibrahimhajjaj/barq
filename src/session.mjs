@@ -814,6 +814,28 @@ export class Barq {
     };
   }
 
+  async narrowTarget(page, goal, values, history, act, answers) {
+    const fits = { type: FIELDISH, select: SELECTISH, upload: FILEISH }[act.tool] ?? (() => true);
+    const byI = new Map(page.elements.map(e => [String(e.i), e]));
+    const close = Object.entries(answers.target?.probabilities ?? {})
+      .filter(([i, p]) => p >= 0.03 && byI.has(i) && fits(byI.get(i)))
+      .sort(([, a], [, b]) => b - a).slice(0, 5);
+    if (close.length < 2) return null;
+    const task = { goal, ...(Object.keys(values).length ? { values: forJev(values) } : {}), history };
+    // the heading each sits under is what tells look-alikes apart, so this question gets it
+    const elements = close.map(([i]) => { const { section, ...e } = byI.get(i); return section ? { ...e, under: section } : e; });
+    const { answers: again } = await this.call({ page: { ...page, elements }, task }, {
+      target: {
+        type: "choice",
+        instructions: "The next step toward `task.goal` acts on one of the elements in `page.elements`, and they are easy to confuse. Compare their words, labels, the heading each is `under`, and where each sits on the page: which one, by its `i`?",
+        criteria: Object.fromEntries(close.map(([i]) => [i, null])),
+      },
+    });
+    const [best, p] = Object.entries(again.target?.probabilities ?? {}).sort(([, a], [, b]) => b - a)[0] ?? [];
+    if (best == null || p < 0.6 || !byI.has(best)) return null;
+    return { target: +best, p_target: p, el: byI.get(best), target_by: "asked again among the likeliest" };
+  }
+
   locate(i) {
     const f = this.frames.get(i) ?? this.page.mainFrame();   // the frame that listed it
     return f.locator(`[data-jev-i="${String(i)}"]`).first();
@@ -1748,6 +1770,16 @@ export class Barq {
         await sleep(600);
         history.push({ action: "wait" });
         continue;
+      }
+      // Jev split between a few elements is usually split between look-alikes: two "Edit" links, a
+      // label and its field. Asked again with only those on offer, told that they are the choice, it
+      // mostly settles on one. Once per round, and what it settles on has to clear a higher bar.
+      if (TARGETED.has(act.tool) && act.p_target < minTarget && !act.target_by) {
+        const pick = await this.narrowTarget(page, goal, values, history.slice(-12), act, a);
+        if (pick) {
+          Object.assign(act, pick);
+          r.target = act.target; r.p_target = +act.p_target.toFixed(2); r.el = brief(act.el); r.asked_again = true;
+        }
       }
       if (TARGETED.has(act.tool) && act.p_target < minTarget) {
         status = "ambiguous";
