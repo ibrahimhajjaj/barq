@@ -163,9 +163,15 @@ server.registerTool("browser_snapshot", {   // the page as numbered elements
   title: "Page snapshot",
   annotations: { readOnlyHint: true, openWorldHint: true },
   description: "The current page, short: the text on screen and every control, numbered. For taking over when browser_do comes back ambiguous or stuck; act on the numbers with browser_act.",
-  inputSchema: { session },
-}, tool(async b => {
-  const page = await b.snapshotText();
+  inputSchema: {
+    session,
+    filter: z.string().optional().describe("Only the controls whose line has one of these words, e.g. \"checkout cart\""),
+    diff: z.boolean().optional().describe("Only what is new or changed since the last snapshot or step on this page"),
+    urls: z.boolean().optional().describe("false leaves out link addresses, which are half of a page of links"),
+    max_chars: z.number().int().min(500).max(100_000).optional().describe("Stop listing controls once the snapshot is this long"),
+  },
+}, tool(async (b, { filter, diff, urls, max_chars }) => {
+  const page = await b.snapshotText({ filter, diff, urls: urls ?? true, maxChars: max_chars });
   return b.onBlankTab() ? `${page}\n\n${BLANK_TAB}` : page;
 }));
 

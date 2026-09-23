@@ -290,18 +290,43 @@ function elementLine(e) {
 }
 
 // The page one element to a line, for a model taking over from Jev.
-export function formatPage(page, { maxElements = 400 } = {}) {   // -> text
-  const shown = page.elements.slice(0, maxElements);
-  const rest = page.elements.length - shown.length;
-  return [
+// Options make the listing smaller for a caller that knows what it is after: `filter` keeps the
+// controls whose line has one of its words, `urls: false` drops links' addresses (on a page of links
+// they are half the text), `since` keeps only what is new or different from an earlier listing, and
+// `maxChars` stops listing once the text is that long. Numbers stay those of the whole page.
+export function formatPage(page, { maxElements = 400, filter, urls = true, since, maxChars } = {}) {   // -> text
+  const lineOf = e => elementLine(urls ? e : { ...e, href: undefined });
+  const unnumbered = line => line.replace(/^\[\d+\] /, "");
+  let elements = page.elements, text = page.text, notes = [];
+  if (since) {
+    const before = new Set(since.elements.map(e => unnumbered(lineOf(e))));
+    elements = elements.filter(e => !before.has(unnumbered(lineOf(e))));
+    const d = pageDiff(since, page) ?? {};
+    text = d.new_text ?? "(no new text)";
+    notes.push(`changes since the last snapshot: ${elements.length} new or changed, ${d.removed?.length ?? 0} gone${d.url ? `, url ${d.url}` : ""}`);
+  }
+  if (filter) {
+    const words = String(filter).toLowerCase().split(/\s+/).filter(Boolean);
+    elements = elements.filter(e => words.some(w => lineOf(e).toLowerCase().includes(w)));
+    notes.push(`showing the ${elements.length} of ${page.elements.length} elements that mention ${words.map(w => `"${w}"`).join(" or ")}`);
+  }
+  const head = [
     `url: ${page.url}`,
     `title: ${page.title}`,
     ...(page.dialogs?.length ? [`dialogs: ${page.dialogs.join(" || ")}`] : []),
-    `visible text: ${page.text}`,
+    `${since ? "new text" : "visible text"}: ${text}`,
+    ...notes,
     `elements (${page.elements.length}):`,
-    ...shown.map(elementLine),
-    ...(rest > 0 ? [`… ${rest} more`] : []),
-  ].join("\n");
+  ];
+  const lines = [];
+  let size = head.join("\n").length;
+  for (const e of elements.slice(0, maxElements)) {
+    const line = lineOf(e);
+    if (maxChars && size + line.length + 1 > maxChars - 40) break;   // room left for the "more" line
+    lines.push(line); size += line.length + 1;
+  }
+  const rest = elements.length - lines.length;
+  return [...head, ...lines, ...(rest > 0 ? [`… ${rest} more${maxChars ? " (narrow it with filter)" : ""}`] : [])].join("\n");
 }
 
 

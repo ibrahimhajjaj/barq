@@ -1108,3 +1108,24 @@ test("a goal about time sees how far each date is from today; any other goal see
   assert.doesNotMatch(seen[1], /days\)/);
   await b2.close();
 });
+
+test("a snapshot can be cut down: to some words, without addresses, to what changed, to a size", async () => {
+  const b2 = await Barq.launch({ browser });
+  await b2.page.setContent(`<a href="/cart">Cart</a><a href="/help">Help</a><button onclick="this.insertAdjacentHTML('afterend', '<button>Checkout</button>')">Add to cart</button>
+    ${Array.from({ length: 40 }, (_, k) => `<a href="/p/${k}">Product ${k}</a>`).join("")}`);
+  const all = await b2.snapshotText();
+  const some = await b2.snapshotText({ filter: "cart" });
+  assert.match(some, /"Cart"/); assert.match(some, /"Add to cart"/); assert.doesNotMatch(some, /"Help"/);
+  assert.doesNotMatch(await b2.snapshotText({ urls: false }), /href=/);
+  const small = await b2.snapshotText({ maxChars: 800 });
+  assert.ok(small.length <= 800 && small.length < all.length, `${small.length} chars`);
+  assert.match(small, /more \(narrow it with filter\)/);
+  await b2.snapshotText();
+  await b2.page.click("text=Add to cart");
+  const diff = await b2.snapshotText({ diff: true });
+  assert.match(diff, /"Checkout"/);
+  assert.doesNotMatch(diff, /Product 7/, "what was there before isn't listed again");
+  const n = +diff.match(/\[(\d+)\] button "Checkout"/)[1];
+  assert.equal(b2.shown.elements.find(e => e.i === n)?.text, "Checkout", "its number is the whole page's");
+  await b2.close();
+});

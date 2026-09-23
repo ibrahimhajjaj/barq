@@ -539,7 +539,13 @@ export class Barq {
     return !url || url === "about:blank";
   }
 
-  async snapshotText() { await this.settle(); const listed = await this.snapshot(); this.shown = listed; return formatPage(listed); }
+  async snapshotText({ diff = false, ...options } = {}) {
+    await this.settle();
+    const listed = await this.snapshot();
+    const since = diff && this.shown?.url === listed.url ? this.shown : undefined;
+    this.shown = listed;
+    return formatPage(listed, { ...options, since });
+  }
 
   // The tools the current tab's site offers through WebMCP. The protocol session is opened on
   // first use; enabling it reports the tools already registered.
