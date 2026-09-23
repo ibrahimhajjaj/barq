@@ -42,7 +42,10 @@ need to read them, use `browser_scan` instead of opening them one by one: it rea
 background tabs, one JSON line per page into a file, with no model tokens per page. It returns at
 once; follow it with `browser_scan_status`, then read the file. Pass `js` (an expression run in
 the page) or `selector`, and `click_until_gone` for a "load more" button. If it reports
-`blocked`, a site showed a captcha or "unusual traffic" page: tell the user and stop.
+`blocked`, a site showed a captcha or "unusual traffic" page: tell the user and stop. If it was
+blocked by a site answering 429 or 503 (too many requests), barq has already waited and tried
+again; the pages not read stay to do, so run the same scan later with more jitter or fewer tabs.
+Every record carries the page's HTTP `status`, so a 404 or 500 can be told from real content.
 
 ## Statuses from browser_do
 

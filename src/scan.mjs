@@ -14,6 +14,13 @@ const sleep = ms => new Promise(done => setTimeout(done, ms));
 
 export class ScanBlocked extends Error {}
 
+// Answers that mean "fewer requests, please" rather than "here is the page". Saved as a result they
+// would pass for the page itself, and a checkpoint would count that page as done.
+const SLOW_DOWN = new Set([429, 503]);
+export class ScanRateLimited extends Error {
+  constructor(message, waitMs) { super(message); this.waitMs = waitMs; }
+}
+
 // A job is a URL, or { url, key?, ...anything to keep with its result }. The key (the URL by
 // default) is what the checkpoint remembers.
 export function normalizeJobs(jobs) {
@@ -66,7 +73,7 @@ async function clickUntilGone(page, name, { max = 20, pause = 900 } = {}) {
 // the records themselves go to `onRecord` and the checkpoint file as they happen.
 export async function scan(host, jobs, {
   tabs = 3, jitter = [1000, 3000], checkpoint, waitFor, clickUntilGone: more, stopOn = BLOCKED,
-  retries = 1, timeout = 45_000, signal, onRecord = () => {}, ...pick
+  retries = 1, timeout = 45_000, rateLimitPause = 15_000, signal, onRecord = () => {}, ...pick
 } = {}) {
   const all = normalizeJobs(jobs), done = doneKeys(checkpoint);
   const queue = all.filter(j => !done.has(j.key));
@@ -78,12 +85,18 @@ export async function scan(host, jobs, {
   const stopped = () => summary.blocked || signal?.aborted;
 
   const visit = async (page, job) => {
-    await page.goto(job.url, { waitUntil: "domcontentloaded", timeout });
+    const response = await page.goto(job.url, { waitUntil: "domcontentloaded", timeout });
+    const status = response?.status() ?? null;
+    if (SLOW_DOWN.has(status)) {
+      // Retry-After in seconds, when the site says how long
+      const after = Number(response.headers()["retry-after"]);
+      throw new ScanRateLimited(`${new URL(job.url).host} answered ${status}`, Number.isFinite(after) ? after * 1000 : null);
+    }
     if (stopOn.test(page.url())) throw new ScanBlocked(`the site sent us to ${page.url()}`);
     if (waitFor) await page.locator(waitFor).first().waitFor({ timeout: Math.min(timeout, 20_000) }).catch(() => {});
     const clicks = more ? await clickUntilGone(page, more) : 0;
     if (stopOn.test(page.url())) throw new ScanBlocked(`the site sent us to ${page.url()}`);
-    return { result: await read(page, job), ...(clicks ? { clicks } : {}) };
+    return { result: await read(page, job), ...(status != null ? { status } : {}), ...(clicks ? { clicks } : {}) };
   };
 
   const worker = async () => {
@@ -99,6 +112,14 @@ export async function scan(host, jobs, {
             break;
           } catch (e) {
             if (e instanceof ScanBlocked) { summary.blocked = e.message; queue.unshift(job); return; }
+            // The site asked for fewer requests: wait as long as it said, or a pause that grows with
+            // each try, and ask for the same page again. Still refused after that, the scan stops with
+            // the page left to do, so a rerun picks it up once the site has calmed down.
+            if (e instanceof ScanRateLimited) {
+              if (attempt <= retries) { await sleep(Math.min(e.waitMs ?? rateLimitPause * attempt, 120_000)); continue; }
+              summary.blocked = `${e.message} after ${attempt} tries: the site is limiting requests; run it again later with more jitter or fewer tabs`;
+              queue.unshift(job); return;
+            }
             record = { key, url, ...extra, error: String(e.message).split("\n")[0].slice(0, 200), attempt, at: new Date().toISOString() };
             if (attempt <= retries) await sleep(3000);
           }

@@ -307,7 +307,10 @@ server.registerTool("browser_scan_status", {
   if (!s) return text({ error: `no scan ${id}; this server has ${[...scans.keys()].join(", ") || "none"}` });
   if (stop && s.status === "running") s.ac.abort();
   const { ac, run, ...shown } = s;
-  return text({ ...shown, ...(s.status === "blocked" ? { info: "a site answered with a captcha or 'unusual traffic' page: tell the user; don't retry until they have looked" } : {}) });
+  const why = s.status !== "blocked" ? null : /limiting requests/.test(s.summary?.blocked ?? "")
+    ? "the site kept answering 429 or 503, asking for fewer requests: the pages not read yet stay to do, so run it again later with more jitter or fewer tabs"
+    : "a site answered with a captcha or 'unusual traffic' page: tell the user; don't retry until they have looked";
+  return text({ ...shown, ...(why ? { info: why } : {}) });
 });
 
 server.registerTool("browser_sessions", {

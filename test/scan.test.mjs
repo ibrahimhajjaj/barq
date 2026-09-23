@@ -8,7 +8,7 @@ import { join } from "node:path";
 import { chromium } from "playwright";
 import { scan, normalizeJobs } from "../src/scan.mjs";
 
-let browser, context, server, base, live = 0, peak = 0, flakyHits = 0;
+let browser, context, server, base, live = 0, peak = 0, flakyHits = 0, limitedHits = 0;
 const host = { newTab: () => context.newPage() };
 const dir = mkdtempSync(join(tmpdir(), "barq-scan-"));
 // the browser may still be writing in there; a folder left in /tmp beats a failed cleanup
@@ -33,6 +33,12 @@ before(async () => {
       }
       if (path === "/blocked") { res.writeHead(302, { location: "/sorry/index?continue=x" }); return res.end(); }
       if (path.startsWith("/sorry/")) { res.setHeader("content-type", "text/html"); return res.end("<p>unusual traffic</p>"); }
+      if (path === "/limited-once") {
+        if (++limitedHits === 1) { res.writeHead(429, { "retry-after": "0" }); return res.end("slow down"); }
+        res.setHeader("content-type", "text/html");
+        return res.end("<li>let through</li>");
+      }
+      if (path === "/limited") { res.writeHead(429); return res.end("slow down"); }
       if (path === "/flaky") {
         if (++flakyHits === 1) { await sleep(3000); }
         res.setHeader("content-type", "text/html");
@@ -99,4 +105,22 @@ test("an error gets one more try; a page that keeps failing is written as an err
   assert.equal(lines(file)[0].attempt, 2);
   const s3 = await scan(host, [`${base}/nowhere-at-all`], { tabs: 1, jitter: [0, 0], checkpoint: file, timeout: 500, js: "1" });
   assert.equal(s3.skipped, 0, "an error isn't a done page");
+});
+
+test("a site that asks for fewer requests is waited on and asked again, not saved as the page", async () => {
+  const file = join(dir, "limited-once.jsonl");
+  const sum = await scan(host, [`${base}/limited-once`, `${base}/p/1`], { tabs: 1, jitter: [0, 0], checkpoint: file, selector: "li", rateLimitPause: 50 });
+  assert.equal(sum.blocked, null);
+  const records = readFileSync(file, "utf8").trim().split("\n").map(l => JSON.parse(l));
+  assert.deepEqual(records.map(r => [r.result[0], r.status]), [["let through", 200], ["item 1a", 200]]);
+});
+
+test("a site still refusing after the retries stops the scan and leaves its page to do", async () => {
+  const file = join(dir, "limited.jsonl");
+  const sum = await scan(host, [`${base}/limited`, `${base}/p/2`], { tabs: 1, jitter: [0, 0], checkpoint: file, selector: "li", rateLimitPause: 50, retries: 1 });
+  assert.match(sum.blocked, /answered 429 after 2 tries: the site is limiting requests/);
+  assert.equal(sum.done, 0);
+  assert.equal(sum.left, 2, "neither page is marked done, so a rerun reads both");
+  let saved = ""; try { saved = readFileSync(file, "utf8"); } catch {}
+  assert.equal(saved.trim(), "", "nothing from the refusal was written as a result");
 });
