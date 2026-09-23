@@ -16,7 +16,7 @@ import { ENUMERATE } from "./page-script.mjs";
 import { FIELDISH, SELECTISH, FILEISH, brief, likelyFor, phrasesFrom, plainGoal, goalMet, mentions, pageDiff, repeatedElements, formatPage, clipMiddle, optionSummary, numbersIn, kindsOf, countKind, mayCount } from "./page-model.mjs";
 import { readBlocks, toText, passages, findPassages } from "./reader.mjs";
 import { commitsSomething, COMMITTING_TOOLS } from "./safety.mjs";
-import { forJev, resolveValue, autofillAccount } from "./secrets.mjs";
+import { forJev, resolveValue, autofillAccount, isSecret } from "./secrets.mjs";
 import { SiteTools } from "./webmcp.mjs";
 import { describe, place, recipeKey, findElement, fingerprint, matches, valuesPrint } from "./recipes.mjs";
 import { ABOUT_TIME, annotateDates } from "./dates.mjs";
@@ -1576,6 +1576,25 @@ export class Barq {
     return named.length === 1 ? named[0] : null;
   }
 
+  // A save read back from the page. Before a click that may save what this step typed, barq counts
+  // the records on the page (rows, list items, cards) holding every value it typed; after it, one
+  // more of them means the save made exactly one record with those values in it. Secrets are
+  // never looked for on the page.
+  plainTyped(values, entered) {
+    return entered.filter(k => !isSecret(k, values[k]) && typeof values[k] === "string" && values[k].trim().length >= 2).map(k => values[k].trim());
+  }
+
+  recordsHolding(texts) {
+    if (!texts.length) return Promise.resolve(null);
+    return this.page.evaluate(texts => {
+      const low = texts.map(t => t.toLowerCase());
+      const records = [...document.querySelectorAll("tr, li, article, [role=row], [role=listitem], [role=article]")];
+      // the innermost record that holds them all, so a list and its items aren't both counted
+      const holding = records.filter(r => { const t = (r.innerText ?? "").toLowerCase(); return low.every(v => t.includes(v)); });
+      return holding.filter(r => !holding.some(o => o !== r && r.contains(o))).length;
+    }, texts).catch(() => null);
+  }
+
   // A form that was filled and sent often answers with a page that only says "Received": nothing
   // on it shows the values, so Jev can't tell and the step would end unsure. What barq did is
   // known, though. Every value went in without an error, the last action pressed the button the
@@ -1654,7 +1673,7 @@ export class Barq {
     let echoedGoal = false;
     const seen = new Map();
     // the element the last action went to, and a list field typed into without choosing from it
-    let acted = null, typed = null, pressedEnding = false, staleRounds = 0, waitedOnWall = false, lastAct = null;
+    let acted = null, typed = null, pressedEnding = false, staleRounds = 0, waitedOnWall = false, lastAct = null, beforeSave = null;
     ({ prompt: this.promptText } = values);
     this.loginIntent(values);
     // The call right after this goal stopped for confirmation goes on with the same flow: a recipe
@@ -1827,6 +1846,11 @@ export class Barq {
             try { r.act_ms = await this.act({ tool: "click", target: ending.i }); } catch (e) { h.error = actionError(e); }
             history.push(h);
             continue;
+          }
+          const now = beforeSave?.count != null ? await this.recordsHolding(beforeSave.texts) : null;
+          if (r.confirm < 0.65 && now === beforeSave?.count + 1 && !history.slice(before).some(h => h.error)) {
+            status = "done"; info = `read back: the page has one new record holding ${beforeSave.texts.map(t => `"${t}"`).join(", ")}`;
+            break;
           }
           if (r.confirm < 0.65 && this.formWentThrough(goal, values, entered, lastAct, page, a, history.slice(before))) {
             status = "done"; info = "every value went in and the form was sent: the button the goal ends on was pressed and the page moved on";
@@ -2056,6 +2080,8 @@ export class Barq {
       await acted?.dispose().catch(() => {});
       acted = handle;
       this.typedUnchosen = false;
+      const texts = ["click", "press_enter"].includes(act.tool) ? this.plainTyped(values, entered) : [];
+      if (texts.length) beforeSave = { texts, count: await this.recordsHolding(texts) };
       try {
         r.act_ms = await this.act(act);
         if (act.tool === "type" && this.typedUnchosen && handle) typed = { el: handle, label: brief(act.el) };

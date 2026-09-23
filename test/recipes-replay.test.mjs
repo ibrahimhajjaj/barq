@@ -783,3 +783,31 @@ test("a captcha nobody can see is handed back with how to let a person in; nothi
   assert.match(r.info, /BARQ_ATTACH/);
   assert.ok(Date.now() - started < 8000);
 });
+
+// A contacts table with a form under it; `drops` makes the save lose the city.
+const CONTACTS = drops => `<table><tr><th>Name</th><th>City</th></tr><tr><td>Grace</td><td>Arlington</td></tr></table>
+  <label>Name <input id="n"></label><label>City <input id="c"></label>
+  <button onclick="document.querySelector('table').insertAdjacentHTML('beforeend', '<tr><td>' + n.value + '</td><td>' + (${drops} ? '' : c.value) + '</td></tr>')">Save contact</button>`;
+async function saveContact(t, drops) {
+  const { b } = await session(t, CONTACTS(drops));
+  jev(b, (page, history) => {
+    const typed = history.filter(h => h.action === "type").length;
+    if (typed === 0) return answer({ tool: "type", target: el(page, e => e.label === "Name"), value: "name" });
+    if (typed === 1) return answer({ tool: "type", target: el(page, e => e.label === "City"), value: "city" });
+    if (!did(history, "Save contact")) return answer({ target: el(page, e => e.text === "Save contact") });
+    return finished(0.55);
+  });
+  b.call = async () => ({ answers: { complete: { noul: 0.3 }, q: { noul: 0.3 } } });
+  return b.do("Fill in the contact form and save it", { values: { name: "Ada", city: "Lisbon" }, recipe: false });
+}
+
+test("a save read back as one new record holding the typed values ends done", async t => {
+  const r = await saveContact(t, false);
+  assert.equal(r.status, "done", r.info);
+  assert.match(r.info, /one new record holding "Ada", "Lisbon"/);
+});
+
+test("a save whose new record lacks a typed value is left for the caller to check", async t => {
+  const r = await saveContact(t, true);
+  assert.equal(r.status, "likely_done", r.info);
+});
