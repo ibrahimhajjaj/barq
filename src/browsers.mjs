@@ -411,9 +411,13 @@ export class AttachedBrowser {
       let targetId;
       try { ({ targetId } = await cdp.send("Target.createTarget", { url: `about:blank${marker}`, ...opts })); }
       catch (e) { lastError = e; continue; }
-      const deadline = Date.now() + 10_000;
+      // Found by its address first. A tab created while the machine is busy can take seconds to
+      // report even about:blank, so after a moment it is also looked for by the id the browser
+      // gave it, which it has from the start.
+      const started = Date.now(), deadline = started + 20_000;
       while (Date.now() < deadline) {
-        const page = this.context.pages().find(p => !this.owned.has(p) && p.url().endsWith(marker));
+        let page = this.context.pages().find(p => !this.owned.has(p) && p.url().endsWith(marker));
+        if (!page && Date.now() - started > 1500) page = await this.pageWithTarget(targetId);
         if (page) { (this.markers ??= new WeakMap()).set(page, marker); return this.own(page); }
         await sleep(25);
       }
@@ -421,6 +425,17 @@ export class AttachedBrowser {
       throw new Error("the new tab never showed up");
     }
     throw lastError;
+  }
+
+  async pageWithTarget(targetId) {
+    for (const p of this.browser.contexts().flatMap(c => c.pages())) {
+      if (this.owned.has(p) || !/^(about:blank|)$/.test(p.url().replace(/#.*/, ""))) continue;
+      const cdp = await this.context.newCDPSession(p).catch(() => null);
+      const info = await cdp?.send("Target.getTargetInfo").catch(() => null);
+      await cdp?.detach().catch(() => {});
+      if (info?.targetInfo?.targetId === targetId) return p;
+    }
+    return null;
   }
 
   async dispose() {

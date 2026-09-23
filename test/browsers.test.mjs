@@ -399,3 +399,19 @@ test("a stopped helper worker is woken by the agent's new tab", async () => {
     await host.dispose();
   } finally { await chrome.stop(); }
 });
+
+test("a new tab that is slow to report its address is still found, by the id the browser gave it", async () => {
+  const chrome = await startBrowser();
+  try {
+    const host = await AttachedBrowser.connect(chrome.dir, { placement: "tab" });
+    // a busy machine: every page reports a bare about:blank for now, marker and all withheld
+    const pages = host.context.pages.bind(host.context);
+    host.context.pages = () => pages().map(p => new Proxy(p, { get: (t, k) => k === "url" ? () => "about:blank" : (typeof t[k] === "function" ? t[k].bind(t) : t[k]) }));
+    const page = await host.newTab({ session: "main" });
+    host.context.pages = pages;
+    assert.ok(page, "the tab was found");
+    await page.goto(`${base}/`);
+    assert.equal(await page.title(), "agent");
+    await host.dispose();
+  } finally { await chrome.stop(); }
+});
