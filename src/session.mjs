@@ -807,12 +807,16 @@ export class Barq {
   // Jev answers "which action", "which element" and "which value" as separate questions. Put
   // together they can contradict each other, so this settles them into one action that the page
   // can actually take.
-  resolve(page, answers, values, { typedInto = null } = {}) {
+  resolve(page, answers, values, { typedInto = null, entered = [] } = {}) {
     const elementOf = new Map(page.elements.map(e => [String(e.i), e]));
     const ranked = answers.target ? Object.entries(answers.target.probabilities).sort(([, a], [, b]) => b - a) : [];
     let tool = answers.tool.choice;
     let [number, p] = ranked[0] ?? [null, 0];
     let ruled = null;
+    // Every value has gone in and Jev still says "type", pointing at something that takes no text
+    // (a radio, a button): there is nothing left to type, and the element it picked is the step.
+    const allIn = Object.keys(values).length > 0 && Object.keys(values).every(k => entered.includes(k));
+    if (tool === "type" && allIn && number != null && !FIELDISH(elementOf.get(number))) tool = "click";
 
     // Enter straight after typing is what sends what was typed, so it goes to that field. Jev can be
     // sure it wants Enter and unsure where, and a checkbox next to a new todo is not where: the text
@@ -1709,7 +1713,8 @@ export class Barq {
       if (stillThere) page = early;
       prevPage = page;
       const previous = history.slice(before).filter(h => h.action).at(-1);
-      const act = this.resolve(page, a, values, { typedInto: previous?.action === "type" && !previous.error ? previous.element : null });
+      const entered = history.slice(before).filter(h => VALUED.includes(h.action) && !h.error && h.value != null).map(h => h.value);
+      const act = this.resolve(page, a, values, { typedInto: previous?.action === "type" && !previous.error ? previous.element : null, entered });
       const r = this.roundRecord(round, a, act, page);
       let done = r.done;
       rounds.push(r);

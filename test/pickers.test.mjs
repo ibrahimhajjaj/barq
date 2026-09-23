@@ -126,3 +126,16 @@ test("keys never go to a button that took the focus from the field; a field that
   await b.typeInto(b.page.locator("#field"), { value: "hooks" }, { timeout: 4000 });
   assert.equal(await b.page.inputValue("#real"), "hooks", "the search the page opened got the text");
 });
+
+test("with every value typed, a 'type' aimed at a radio is a click on that radio", () => {
+  const page = { elements: [
+    { i: 0, tag: "input:text", label: "Text input", value: "hello" },
+    { i: 11, tag: "input:radio", label: "Checked radio" },
+    { i: 12, tag: "input:radio", label: "Default radio" },
+  ] };
+  const answers = { tool: { choice: "type", probabilities: { type: 0.8 } }, target: { probabilities: { 12: 0.68, 11: 0.13, 0: 0.12 } } };
+  const r = b.resolve(page, answers, { text_input: "hello" }, { entered: ["text_input"] });
+  assert.deepEqual([r.tool, r.target], ["click", 12]);
+  // a value still to type keeps the rule that finds it a field
+  assert.equal(b.resolve(page, answers, { text_input: "hello", other: "x" }, { entered: ["text_input"] }).tool, "type");
+});
