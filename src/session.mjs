@@ -92,6 +92,8 @@ const HIGHLIGHT_MS = Number(process.env.BARQ_HIGHLIGHT_MS ?? 150);
 const POST_ACTION_MS = 350;
 const BRIEF_WATCH_MS = 120;
 const LANDS_QUIETLY = new Set(["type", "press_key", "hover"]);
+// How long a field that offers a list as you type gets for that list to show up.
+const SUGGESTIONS_MS = 1500;
 // The first request of a process answers about half a second slower than the ones after it, by the
 // API's own timing rather than ours. Asking it something trivial while the first page is still
 // loading means the caller never pays for that.
@@ -764,6 +766,61 @@ export class Barq {
     // a masked or otherwise fussy field may have taken something else: put it right in one go
     const inField = await loc.inputValue({ timeout: 1000 }).catch(() => null);
     if (inField !== null && inField !== text) await loc.fill(text, opts);
+    // A field that offers a list as you type takes its value from the list. The text on its own is
+    // thrown away when the focus moves on, so the suggestion that starts with what was typed is
+    // chosen now, while the list is open, rather than left for a later round that may never come.
+    this.typedUnchosen = false;
+    if (text && await this.offersList(loc)) this.typedUnchosen = !(await this.pickSuggestion(loc, text));
+  }
+
+  // A field that shows a list of suggestions to pick from as you type. A query box is left out: its
+  // suggestions are shortcuts to other queries, and running what was typed is what the goal wants.
+  // A search form is not a query box: a flight search's "Where to?" takes its value from the list.
+  offersList(loc) {
+    return loc.evaluate(el => {
+      const words = `${el.name ?? ""} ${el.id ?? ""} ${el.getAttribute("aria-label") ?? ""} ${el.placeholder ?? ""}`.toLowerCase();
+      if (el.type === "search" || el.tagName === "TEXTAREA" || el.getAttribute("role") === "searchbox"
+        || /(^|[^a-z])(q|query|keywords?|search\w*)([^a-z]|$)/.test(words)) return false;
+      const auto = el.getAttribute("aria-autocomplete");
+      return el.getAttribute("role") === "combobox" || auto === "list" || auto === "both"
+        || el.getAttribute("aria-haspopup") === "listbox" || !!el.parentElement?.closest("[role=combobox]");
+    }).catch(() => false);
+  }
+
+  // Choose the first suggestion that starts with `text`, in the order the site ranks them. Only a
+  // suggestion that starts with what was typed is taken; anything else is left to the next round.
+  async pickSuggestion(loc, text) {
+    const want = text.replace(/\s+/g, " ").trim().toLowerCase();
+    const until = Date.now() + SUGGESTIONS_MS;
+    let listedAt = 0;
+    while (Date.now() < until) {
+      const found = await loc.evaluateHandle((el, want) => {
+        const ids = `${el.getAttribute("aria-controls") ?? ""} ${el.getAttribute("aria-owns") ?? ""}`.split(/\s+/).filter(Boolean);
+        const lists = ids.map(id => document.getElementById(id)).filter(Boolean);
+        const shown = e => { const r = e.getBoundingClientRect(); return r.width > 0 && r.height > 0; };
+        const words = e => (e.innerText || e.getAttribute("aria-label") || "").replace(/\s+/g, " ").trim().toLowerCase();
+        // the list the field names first; a field can name a list that isn't the one on screen
+        const listed = scope => scope.flatMap(l => [...l.querySelectorAll("[role=option]")]).filter(shown);
+        const own = listed(lists);
+        const options = own.length ? own : listed([document]);
+        return { match: options.find(o => words(o).startsWith(want)) ?? null, count: options.length };
+      }, want).catch(() => null);
+      const match = await found?.getProperty("match").then(m => m.asElement()).catch(() => null);
+      const count = await found?.getProperty("count").then(c => c.jsonValue()).catch(() => 0);
+      await found?.dispose().catch(() => {});
+      if (match) {
+        // a list that redraws on every keystroke can replace the option under the click: look again
+        const clicked = await match.click({ timeout: 2000 }).then(() => true, () => false);
+        await match.dispose().catch(() => {});
+        if (clicked) return true;
+        await sleep(60);
+        continue;
+      }
+      // a list that is showing and has had a moment to fill, with nothing that fits: stop waiting
+      if (count) { listedAt ||= Date.now(); if (Date.now() - listedAt > 400) return false; }
+      await sleep(60);
+    }
+    return false;
   }
 
   async selectOption(loc, act, opts) {
@@ -1288,6 +1345,8 @@ export class Barq {
     // something other than the echo, so the first such finish is not taken at its word.
     let echoedGoal = false;
     const seen = new Map();
+    // the element the last action went to, and a list field typed into without choosing from it
+    let acted = null, typed = null;
     ({ prompt: this.promptText } = values);
     this.loginIntent(values);
     // The call right after this goal stopped for confirmation goes on with the same flow: a recipe
@@ -1359,9 +1418,18 @@ export class Barq {
       }
       if (counting) await this.count(counting, page, goal);
 
+      // Text typed into a list field with nothing chosen from its list is not a value yet, however
+      // much the field looks like the goal: this round can't finish on it. Emptied since, it never
+      // took at all. A field can hand its text to another input as it opens its list, so empty
+      // means nothing holds it: this field is empty and so is whatever has the focus now.
+      const unchosen = !!typed;
+      const dropped = typed && await typed.el.evaluate(el => el.isConnected && el.value === "" && !document.activeElement?.value).catch(() => false);
+      if (dropped) history.push({ event: `the page emptied ${typed.label} after the focus moved on: type it again and choose from its list` });
+      typed = null;
+
       // something has been done and the page now shows what the goal asked for: no need to ask
       const sinceLast = round > 0 && prevPage ? pageDiff(prevPage, page) : null;
-      if (plain && round > 0 && history.slice(before).some(h => h.action) && goalMet(plain, page, sinceLast) === true) {
+      if (plain && !unchosen && round > 0 && history.slice(before).some(h => h.action) && goalMet(plain, page, sinceLast) === true) {
         status = "done";
         info = `the page shows it: ${plain.kind} ${plain.wants[0]}`;
         rounds.push({ round, checked_in_page: plain.wants[0] });
@@ -1377,6 +1445,7 @@ export class Barq {
       const r = this.roundRecord(round, a, act, page);
       let done = r.done;
       rounds.push(r);
+      if (unchosen && done >= doneAt) { done = 0; r.value_not_in = dropped ? "typed value dropped" : "typed, nothing chosen from its list"; }
       if (counting?.kind) {
         // where a goal counts, the count decides, not Jev's impression of the page
         const wanted = `wanted ${counting.cmp} ${counting.target}`;
@@ -1449,6 +1518,11 @@ export class Barq {
       if (act.tool === "none") {
         // content that arrives late (a modal, a slow render): look once more before giving up
         if (round === 0 && !retried) { retried = true; rounds.pop(); round--; await sleep(1500); continue; }
+        if (dropped) {
+          status = "stuck";
+          info = "a value typed into a field with a list of suggestions was emptied by the page, and nothing that fits was on offer";
+          break;
+        }
         if (round > 0 && a.error.noul < 0.5 && a.blocked.noul < 0.5) {
           // Jev chose actions of its own in this step and now has nothing left to do. That is a step
           // whose result the caller has to confirm, not one going in circles, and calling it stuck
@@ -1565,7 +1639,15 @@ export class Barq {
       if (act.key) h.key = act.key;
       if (r.destination) Object.assign(h, { destination: r.destination });
       if (act.target != null && this.highlight) await this.showDecision(act, r).catch(() => { /* drawing is best effort */ });
-      try { r.act_ms = await this.act(act); }   // how long the action itself took
+      const handle = act.target != null && ["click", "type", "select"].includes(act.tool)
+        ? await this.locate(act.target).elementHandle({ timeout: 1000 }).catch(() => null) : null;
+      await acted?.dispose().catch(() => {});
+      acted = handle;
+      this.typedUnchosen = false;
+      try {
+        r.act_ms = await this.act(act);
+        if (act.tool === "type" && this.typedUnchosen && handle) typed = { el: handle, label: brief(act.el) };
+      }
       catch (e) {
         h.error = actionError(e); r.error = h.error; log(`  ! ${h.error}`);
         // retrying won't make a password manager fill the field: hand the login back

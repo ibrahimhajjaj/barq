@@ -1,0 +1,61 @@
+// Offline tests: fields that take their value from a list. No Jev calls.
+import { test, before, after } from "node:test";
+import assert from "node:assert/strict";
+import { chromium } from "playwright";
+import { Barq } from "../src/session.mjs";
+
+// A field that shows its suggestions a moment after each keystroke, as most do. It names a list
+// through aria-controls that is not the one it draws, which is the case the lookup has to survive.
+const SUGGESTING = (attrs, options) => `<!doctype html><body>
+<div id="elsewhere"></div>
+<input id="field" ${attrs} aria-controls="elsewhere" autocomplete="off">
+<ul id="list" role="listbox"></ul>
+<script>
+  const field = document.getElementById("field"), list = document.getElementById("list");
+  const OPTIONS = ${JSON.stringify(options)};
+  field.addEventListener("input", () => setTimeout(() => {
+    const typed = field.value.toLowerCase();
+    list.innerHTML = typed ? OPTIONS.map(o => '<li role="option">' + o + '</li>').join("") : "";
+  }, 200));
+  list.addEventListener("click", e => {
+    const li = e.target.closest("[role=option]");
+    if (li) { field.value = li.textContent; field.dataset.chosen = "yes"; list.innerHTML = ""; }
+  });
+</script></body>`;
+
+let browser, b;
+before(async () => {
+  browser = await chromium.launch({ headless: true });
+  b = await Barq.launch({ browser });
+});
+after(async () => { await b.close(); await browser?.close(); });
+
+const typeInto = async (value) => {
+  await b.typeInto(b.page.locator("#field"), { value }, { timeout: 4000 });
+  return { value: await b.page.inputValue("#field"), chosen: await b.page.getAttribute("#field", "data-chosen"), unchosen: b.typedUnchosen };
+};
+
+test("a list field takes the suggestion that starts with what was typed, from whichever list shows it", async () => {
+  await b.page.setContent(SUGGESTING('role="combobox" aria-label="Where to?"', ["Lisbon, Portugal", "Lisbon, Maine", "Humberto Delgado Airport"]));
+  const got = await typeInto("Lisbon");
+  assert.equal(got.value, "Lisbon, Portugal", "the first suggestion that fits, in the site's order");
+  assert.equal(got.chosen, "yes");
+  assert.equal(got.unchosen, false);
+});
+
+test("nothing that starts with the text: nothing is chosen, and the step is told so", async () => {
+  await b.page.setContent(SUGGESTING('role="combobox" aria-label="Where to?"', ["Porto, Portugal"]));
+  const got = await typeInto("Lisbon");
+  assert.equal(got.value, "Lisbon");
+  assert.equal(got.chosen, null);
+  assert.equal(got.unchosen, true);
+});
+
+test("a query box keeps what was typed rather than taking a suggested query", async () => {
+  for (const attrs of ['type="search" role="combobox"', 'role="combobox" name="q"', 'role="combobox" aria-label="Search the shop"']) {
+    await b.page.setContent(SUGGESTING(attrs, ["lisbon weather", "lisbon flights"]));
+    const got = await typeInto("lisbon");
+    assert.equal(got.value, "lisbon", attrs);
+    assert.equal(got.chosen, null, attrs);
+  }
+});
