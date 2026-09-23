@@ -529,3 +529,24 @@ test("a cancelled call stops before replaying anything", async t => {
   assert.deepEqual(notes, []);
   assert.deepEqual(await items(b), []);
 });
+
+test("a decision about an element that left the page while it was being made is not acted on", async t => {
+  const { b } = await session(t, `<button onclick="document.body.dataset.clicked = 'old'">Continue</button>`);
+  let first = true;
+  jev(b, async (page, history) => {
+    const target = el(page, e => e.text === "Continue");
+    if (first) {
+      first = false;
+      // the page redraws the button while Jev is still deciding
+      await b.page.evaluate(() => { document.body.innerHTML = `<button onclick="document.body.dataset.clicked = 'new'">Continue</button>`; });
+      return answer({ target });
+    }
+    return did(history, "Continue") && history.some(h => h.action === "click") ? finished(0.95) : answer({ target });
+  });
+  const started = Date.now();
+  const r = await b.do("Press continue", { recipe: false });
+  assert.equal(r.status, "done", r.info);
+  assert.equal(await b.page.evaluate(() => document.body.dataset.clicked), "new", "the button that is on the page now");
+  assert.ok(r.actions.some(h => h.event?.includes("left the page")), "said why it looked again");
+  assert.ok(Date.now() - started < 3000, "no waiting out a click on an element that is gone");
+});

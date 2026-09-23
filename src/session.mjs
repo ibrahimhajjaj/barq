@@ -1395,7 +1395,7 @@ export class Barq {
     let echoedGoal = false;
     const seen = new Map();
     // the element the last action went to, and a list field typed into without choosing from it
-    let acted = null, typed = null, pressedEnding = false;
+    let acted = null, typed = null, pressedEnding = false, staleRounds = 0;
     ({ prompt: this.promptText } = values);
     this.loginIntent(values);
     // The call right after this goal stopped for confirmation goes on with the same flow: a recipe
@@ -1643,6 +1643,16 @@ export class Barq {
         info = "repeating the same sequence of actions; the goal may already be done — check the page";
         break;
       }
+
+      // The page moved on while Jev was deciding: the element it chose has gone, because the page
+      // navigated or redrew that part. Acting would wait out a click that can't land, so the page is
+      // looked at again instead, twice at most in a row.
+      if (act.target != null && !(await this.locate(act.target).count().catch(() => 0))) {
+        if (++staleRounds <= 2) {
+          history.push({ event: `${brief(act.el)} left the page while the step was deciding` });
+          continue;
+        }
+      } else staleRounds = 0;
 
       // questions that only make sense once the action is known
       // A goal's own words go into a search or a text field, never into a control that is offering
