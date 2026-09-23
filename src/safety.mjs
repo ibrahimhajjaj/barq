@@ -25,12 +25,19 @@ const BENIGN = /\b(search|filter|sort|preview|draft|save draft|send (me )?(a |th
 // body text field"); pressing Enter in one can send, so keys are still judged by the words.
 const TEXT_FIELD = /^(input:(text|email|search|url|tel|number|password)|textarea)|\[(textbox|searchbox)\]/;
 
+const LINK = /^a$|\[link\]/;
+const OPENS_A_COMPOSER = /^(reply|post|tweet|comment)$/i;
+
 export function commitsSomething(el, tool) {
   if (!el) return null;
   if ((tool === "click" || tool === "type") && (el.editable || TEXT_FIELD.test(el.tag ?? ""))) return null;
   const words = [el.label, el.text, el.placeholder, el.name].filter(Boolean).join(" ").slice(0, 200);
   if (!words.trim() || BENIGN.test(words)) return null;
   const hit = COMMIT.map(re => words.match(re)).find(Boolean);
+  // A link named "reply", "post" or "tweet" opens a place to write it; the send is a button inside
+  // what it opens, and that button is judged on its own. Money, deletion and "send" stay held on a
+  // link too, since pages do wire those to links that act.
+  if (hit && LINK.test(el.tag ?? "") && OPENS_A_COMPOSER.test(hit[0].trim())) return null;
   return hit ? hit[0].trim() : null;
 }
 
