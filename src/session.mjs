@@ -1329,6 +1329,8 @@ export class Barq {
     // After a replay the loop goes on as if it had taken those actions itself: they count toward
     // maxActions, and its first round sees what the last one changed. That round is also what
     // confirms a full replay: a replay never claims "done" on its own.
+    // where the loop's own actions start, after whatever a replay did
+    const ownFrom = history.length;
     if (!run?.stop) for (let round = run?.count ?? 0; round <= maxActions; round++) {
       if (this.timeLeft() === 0) { status = "timeout"; info = "the step ran out of time; see actions for what was done"; break; }
       // A question costs about a third of a second and so does waiting for the page to go quiet.
@@ -1448,19 +1450,15 @@ export class Barq {
         // content that arrives late (a modal, a slow render): look once more before giving up
         if (round === 0 && !retried) { retried = true; rounds.pop(); round--; await sleep(1500); continue; }
         if (round > 0 && a.error.noul < 0.5 && a.blocked.noul < 0.5) {
-          // "nothing left to do" and "the goal is met" are two questions, and the second one is
-          // soft here: when it is very soft the stricter question is worth asking, because a goal
-          // that names two things ("add both X and Y") reads as unfinished on a page that shows
-          // neither of them in its words, however plainly the buttons say otherwise.
-          if (done < 0.35) {
-            r.confirm = await this.looksFinished(page, goal, history);
-            log(`     confirm=${r.confirm}`);
-            if (r.confirm >= 0.65) { status = "done"; break; }   // the stricter question agrees
-          }
-          // It acted, and now there is nothing left to do. That is a step whose result the caller
-          // has to confirm, not a step going in circles, and calling it stuck sends them off to
-          // redo work the page has already taken.
-          if (history.some(h => h.action && h.action !== "wait")) {
+          // Jev chose actions of its own in this step and now has nothing left to do. That is a step
+          // whose result the caller has to confirm, not one going in circles, and calling it stuck
+          // sends them off to redo work the page has already taken: a goal that names two things
+          // ("add both X and Y") reads as unfinished on a page that shows neither of them in its
+          // words. A replay's actions don't count: a recording that ran and left a page Jev calls
+          // unfinished, with nothing to add, is one that didn't fit, and that is stuck. It is never
+          // "done" from here either. Jev's answer was that the page doesn't look finished, and the
+          // stricter question can veto a finish, never make one out of a no.
+          if (history.slice(ownFrom).some(h => h.action && h.action !== "wait")) {
             status = "likely_done";
             info = "no further action seems needed but Jev is unsure the goal is met; verify with a check, snapshot or screenshot";
             break;
