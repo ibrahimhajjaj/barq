@@ -65,6 +65,8 @@ keep to its Crawl-delay.
   and `browser_act` acts on one directly. Take the snapshot first: the numbers belong to the page
   it listed, and `browser_act` refuses a number this session never saw listed rather than act on
   whatever now sits at it. Then go back to `browser_do`.
+- A canvas, map or drawing has no elements to name: take `browser_screenshot` with `grid: true`
+  and act on a point with `browser_act` `x`/`y` (page pixels, as the grid numbers them).
 - `blocked`: captcha or access denied, or (with `allowed_sites`) the page tried to leave the sites
   the session was kept to. Tell the user. For a captcha, calling again with `wait_for_user_s` (say
   120) puts the tab in front of the user in their own browser and waits for them to get past it;

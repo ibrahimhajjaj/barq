@@ -1145,3 +1145,22 @@ test("with two or more values still to enter, the round asks which field each go
   assert.equal(r.bindKeys, undefined, "one value left is the usual round");
   await b2.close();
 });
+
+test("a canvas has no elements, so a point read off a gridded screenshot is acted on, and still judged by what's under it", async () => {
+  const b2 = await Barq.launch({ browser });
+  await b2.page.setContent(`<body style="margin:0"><canvas id="c" width="400" height="300"></canvas><div style="height:1500px"></div>
+    <button style="position:absolute;left:20px;top:1400px">Delete account</button>
+    <script>
+      const hits = []; document.getElementById("c").addEventListener("click", e => { hits.push([e.offsetX, e.offsetY]); document.body.dataset.hits = JSON.stringify(hits); });
+    </script>`);
+  const shot = await b2.screenshot({ grid: true });
+  assert.ok(shot.length > 1000);
+  assert.equal(await b2.page.$("#__barq_grid"), null, "the grid is gone once the picture is taken");
+  const r = await b2.actOn({ action: "click", x: 250, y: 120 });
+  assert.equal(await b2.page.evaluate(() => document.body.dataset.hits), "[[250,120]]");
+  assert.match(r.element, /at 250,120/);
+  // a point further down, on a control that deletes: scrolled to, and held like any other
+  const held = await b2.actOn({ action: "click", x: 40, y: 1410 });
+  assert.equal(held.status, "needs_confirmation");
+  await b2.close();
+});

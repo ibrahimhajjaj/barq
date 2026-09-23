@@ -234,22 +234,25 @@ server.registerTool("browser_act", {   // one action on a numbered element
     value: z.string().optional().describe("Text to type (or a keychain:/bw:/env: reference, or \"autofill\" / \"autofill:<account>\"), option label to select, or file path to upload"),
     key: z.string().optional().describe("Which key press_key presses, such as Escape"),
     destination: z.number().int().optional().describe("For drag: the number of the element to drop on"),
+    x: z.number().optional().describe("Instead of an element: a point in page pixels, read off browser_screenshot with grid. For canvases, maps and anything with no element to name"),
+    y: z.number().optional(),
+    to_x: z.number().optional().describe("For a drag from a point: where to drop"), to_y: z.number().optional(),
     accept_dialog: z.boolean().optional().describe("Say yes to a confirm or prompt this action raises (\"Delete this item?\"). By default it is turned down"),
     allow_irreversible: z.boolean().optional().describe("Act even if the control pays, sends, posts or deletes; only when the user wants it"),
     session,
   },
-}, tool((b, { accept_dialog, allow_irreversible, session: _, ...args }) => {
+}, tool((b, { accept_dialog, allow_irreversible, to_x, to_y, session: _, ...args }) => {
   if (!b.shown && (args.element != null || args.destination != null)) throw new Error(LISTING_FIRST);
-  return b.actOn({ ...args, acceptDialog: !!accept_dialog, allowIrreversible: !!allow_irreversible });
+  return b.actOn({ ...args, toX: to_x, toY: to_y, acceptDialog: !!accept_dialog, allowIrreversible: !!allow_irreversible });
 }));
 
 server.registerTool("browser_screenshot", {   // the page as a picture
   title: "Screenshot",
   annotations: { readOnlyHint: true, openWorldHint: true },
-  description: "A picture of the current page: what is on screen, or all of it with full_page.",
-  inputSchema: { full_page: z.boolean().optional(), session },
-}, tool(async (b, { full_page }) => {
-  const buf = await b.screenshot({ fullPage: !!full_page });
+  description: "A picture of the current page: what is on screen, or all of it with full_page. With grid, lines every 100 page pixels, numbered, to act on a point with browser_act x/y.",
+  inputSchema: { full_page: z.boolean().optional(), grid: z.boolean().optional(), session },
+}, tool(async (b, { full_page, grid }) => {
+  const buf = await b.screenshot({ fullPage: !!full_page, grid: !!grid });
   return { content: [{ type: "image", mimeType: "image/png", data: buf.toString("base64") }] };
 }));
 

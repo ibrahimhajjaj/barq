@@ -1298,10 +1298,14 @@ export class Barq {
   // The caller picks the element, from the latest snapshot or from browser_do's candidates, and Jev is not asked.
   // Confirm/prompt dialogs are dismissed unless acceptDialog. A control whose words commit money,
   // messages, posts or deletions is left alone unless allowIrreversible.
-  async actOn({ action, element, value, key, destination, acceptDialog = false, allowIrreversible = false }) {
+  async actOn({ action, element, value, key, destination, x, y, toX, toY, acceptDialog = false, allowIrreversible = false }) {
+    // A point on the screen, for what has no element to name: a canvas, a map, a drawing. The
+    // caller reads it off a screenshot; what sits under it is still judged by its words.
+    const at = x != null && y != null ? { x, y } : null;
+    if (at && element != null) throw new Error("give an element or a point, not both");
     const fresh = element != null || destination != null ? await this.snapshot() : null;
-    const el = element == null ? undefined : this.currentElement(element, fresh);
-    if (TARGETED.has(action) && !el) throw new Error(`${action} has to be given an element`);
+    const el = at ? await this.underPoint(at) : element == null ? undefined : this.currentElement(element, fresh);
+    if (TARGETED.has(action) && !el && !at) throw new Error(`${action} has to be given an element`);
 
     const commits = !allowIrreversible && GUARDED.has(action) ? commitsSomething(el, action) : null;
     if (commits) {
@@ -1313,7 +1317,7 @@ export class Barq {
 
     // the caller's own action is never refused for having been done before, but it is written down,
     // so a later step doesn't do it a second time
-    if (allowIrreversible && GUARDED.has(action) && commitsSomething(el, action)) await this.firedBefore(el.i, { again: true });
+    if (allowIrreversible && GUARDED.has(action) && commitsSomething(el, action) && !at) await this.firedBefore(el.i, { again: true });
     const onto = destination == null ? undefined : this.currentElement(destination, fresh).i;
     this.breakFlow();
     this.dialogPolicy = acceptDialog ? ACCEPT_DIALOGS : SAFE_DIALOGS;   // for this one action
@@ -1322,13 +1326,13 @@ export class Barq {
 
     this.lastActionAt = Date.now();
     let ms;
-    try { ms = await this.act({ tool: action, target: el?.i, value, key, destination: onto }); }
+    try { ms = at ? await this.actAtPoint(action, at, { value, key, to: toX != null && toY != null ? { x: toX, y: toY } : null }) : await this.act({ tool: action, target: el?.i, value, key, destination: onto }); }
     finally { this.dialogPolicy = SAFE_DIALOGS; }   // back to the default whatever happened
 
     await this.settle();
     const events = this.events.splice(0, this.events.length);
     return {
-      action, element: brief(el), ms,
+      action, element: at ? `${brief(el)} at ${at.x},${at.y}` : brief(el), ms,
       url: this.page.url(),
       title: await this.page.title().catch(() => ""),
       ...(events.length ? { events } : {}),
@@ -2187,7 +2191,70 @@ export class Barq {
     await sleep(HIGHLIGHT_MS);
   }
 
-  async screenshot({ path, fullPage = false } = {}) { return this.page.screenshot({ fullPage, path }); }
+  // With `grid`, lines every 100 pixels, numbered along the top and left, so a model reading the
+  // picture can say where something is in the page's own coordinates. The grid is drawn over the
+  // page only for the picture and taken away straight after.
+  async screenshot({ path, fullPage = false, grid = false } = {}) {
+    if (!grid) return this.page.screenshot({ fullPage, path });
+    await this.page.evaluate(() => {
+      const w = document.documentElement.scrollWidth, h = document.documentElement.scrollHeight;
+      const ns = "http://www.w3.org/2000/svg", svg = document.createElementNS(ns, "svg");
+      svg.id = "__barq_grid";
+      svg.setAttribute("style", `position:absolute;left:0;top:0;width:${w}px;height:${h}px;pointer-events:none;z-index:2147483647`);
+      let d = "";
+      for (let x = 100; x < w; x += 100) d += `<line x1="${x}" y1="0" x2="${x}" y2="${h}" stroke="red" stroke-opacity=".35"/><text x="${x + 2}" y="12" font-size="11" fill="red">${x}</text>`;
+      for (let y = 100; y < h; y += 100) d += `<line x1="0" y1="${y}" x2="${w}" y2="${y}" stroke="red" stroke-opacity=".35"/><text x="2" y="${y - 2}" font-size="11" fill="red">${y}</text>`;
+      svg.innerHTML = d;
+      document.documentElement.appendChild(svg);
+    });
+    try { return await this.page.screenshot({ fullPage, path }); }
+    finally { await this.page.evaluate(() => document.getElementById("__barq_grid")?.remove()).catch(() => {}); }
+  }
+
+  // What is under a point in the page, described the way an element is, for the guard.
+  underPoint({ x, y }) {
+    return this.page.evaluate(([x, y]) => {
+      if (y - scrollY < 0 || y - scrollY > innerHeight || x - scrollX < 0 || x - scrollX > innerWidth) scrollTo(Math.max(0, x - innerWidth / 2), Math.max(0, y - innerHeight / 2));
+      const hit = document.elementFromPoint(x - scrollX, y - scrollY);
+      if (!hit) return null;
+      const el = hit.closest("button, a, input, select, textarea, [role=button], [role=link]") ?? hit;
+      const tag = el.tagName.toLowerCase();
+      return { tag: tag === "input" ? `input:${el.type}` : tag, text: (el.innerText ?? el.value ?? "").replace(/\s+/g, " ").trim().slice(0, 80), label: el.getAttribute("aria-label") ?? "" };
+    }, [x, y]).catch(() => null);
+  }
+
+  // x and y are page coordinates, as the grid numbers them; the page is scrolled to bring the
+  // point into view first.
+  async actAtPoint(action, { x, y }, { value, key, to } = {}) {
+    const t0 = Date.now();
+    const onScreen = async p => {
+      const { vx, vy } = await this.page.evaluate(([x, y]) => {
+        if (y - scrollY < 0 || y - scrollY > innerHeight || x - scrollX < 0 || x - scrollX > innerWidth) scrollTo(Math.max(0, x - innerWidth / 2), Math.max(0, y - innerHeight / 2));
+        return { vx: x - scrollX, vy: y - scrollY };
+      }, [p.x, p.y]);
+      return [vx, vy];
+    };
+    const [vx, vy] = await onScreen({ x, y });
+    const mouse = this.page.mouse;
+    switch (action) {
+      case "click": await mouse.click(vx, vy); break;
+      case "right_click": await mouse.click(vx, vy, { button: "right" }); break;
+      case "hover": await mouse.move(vx, vy); break;
+      case "type":
+        if (value == null) throw new Error("nothing to type");
+        await mouse.click(vx, vy); await this.page.keyboard.type(await resolveValue(value), { delay: 5 }); break;
+      case "press_key": await mouse.click(vx, vy); await this.page.keyboard.press(key || "Enter"); break;
+      case "drag": {
+        if (!to) throw new Error("a drag at a point needs to_x and to_y");
+        await mouse.move(vx, vy); await mouse.down();
+        const [tx, ty] = [to.x - (x - vx), to.y - (y - vy)];   // same scroll: the drag stays in one view
+        await mouse.move(tx, ty, { steps: 12 }); await mouse.up(); break;
+      }
+      default: throw new Error(`${action} can't be done at a point`);
+    }
+    return Date.now() - t0;
+  }
+
   async close() {
     if (this.ownContext) await this.context.close().catch(() => {});
     else for (const p of this.pages) await p.close().catch(() => {});
