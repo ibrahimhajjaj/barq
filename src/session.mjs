@@ -179,6 +179,7 @@ function boundFields(page, answers, values) {
 }
 
 const COMMIT_MEMORY_MS = 30 * 60_000;
+const WAIT_BUDGET_MS = 30_000;
 // The words a goal ends on when what it wants last is to send a form it has filled.
 const SENDS = new Set(["submit", "send", "save", "register", "apply", "create", "sign", "continue", "confirm", "finish"]);
 const firedAgain = (at, action, element) => ({
@@ -1696,7 +1697,7 @@ export class Barq {
     const t0 = Date.now(), calls0 = this.stats.calls, tokens0 = this.stats.tokens;
     this.pageErrors.length = 0;
     const history = [], rounds = [];
-    let prevPage = null, waits = 0, page = null, status = "max_actions", info, pending, accounts, retried = false;
+    let prevPage = null, waitingSince = null, page = null, status = "max_actions", info, pending, accounts, retried = false;
     let lastTool = null;
     // A goal that says plainly what it wants can be checked against the page instead of asked
     // about: the page itself is better evidence than an opinion, and it costs nothing.
@@ -1971,9 +1972,13 @@ export class Barq {
       }
 
       if (act.tool === "wait") {
-        if (++waits > 6) { status = "stuck"; info = "the page never finished loading"; break; }
+        // Some pages take a while on purpose (a report being built, data from a slow service): the
+        // step waits as long as Jev keeps asking to, up to half a minute, looking every 2 seconds
+        // or so rather than spending a Jev call on each half second.
+        waitingSince ??= Date.now();
+        if (Date.now() - waitingSince > WAIT_BUDGET_MS) { status = "stuck"; info = "the page never finished loading"; break; }
         await this.settle({ max: 4000 });
-        await sleep(600);
+        await sleep(1500);
         history.push({ action: "wait" });
         continue;
       }

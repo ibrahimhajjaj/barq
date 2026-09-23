@@ -827,3 +827,11 @@ test("data the page is still loading after a click is waited for before the step
   assert.equal(r.status, "done", r.info);
   assert.match(await b.page.textContent("#out"), /Data loaded/);
 });
+
+test("a page that takes a quarter of a minute to finish is waited on while Jev asks to wait", async t => {
+  const { b } = await session(t, `<button onclick="setTimeout(() => { document.getElementById('out').textContent = 'Data calculated on the client side.' }, 12000)">Start</button><p id="out"></p>`);
+  jev(b, (page, history) => page.text.includes("Data calculated") ? finished(0.95)
+    : did(history, "Start") ? answer({ tool: "wait" }) : answer({ target: el(page, e => e.text === "Start") }));
+  const r = await b.do("Start it and wait for the data", { recipe: false, maxActions: 20 });
+  assert.equal(r.status, "done", r.info);
+});
