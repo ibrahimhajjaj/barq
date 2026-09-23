@@ -17,7 +17,8 @@ export const ENUMERATE = ({ start, frame }) => {   // start: the first number to
   const VALUE_SHOWN = 120;
   const SECRET_WORDS = ["pass", "passwd", "password", "pin", "otp", "cvv", "cvc", "csc", "cardnumber", "ccnumber"];
 
-  const tidy = (s, max = 80) => (s || "").replace(/\s+/g, " ").trim().slice(0, max);
+  // cut to length without leaving half an emoji at the end
+  const tidy = (s, max = 80) => (s || "").replace(/\s+/g, " ").trim().slice(0, max).replace(/[\uD800-\uDBFF]$/, "");
   const classOf = el => String(el.className?.baseVal ?? el.className ?? "");
   const middleOf = el => { const r = el.getBoundingClientRect(); return [r.left + r.width / 2, r.top + r.height / 2]; };
   const inViewport = (x, y) => x >= 0 && y >= 0 && x < innerWidth && y < innerHeight;

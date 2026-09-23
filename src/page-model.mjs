@@ -306,9 +306,11 @@ export function formatPage(page, { maxElements = 400 } = {}) {   // -> text
 export function clipMiddle(s, n) {
   s = String(s ?? "");
   if (s.length <= n) return s;
-  if (n < 6) return s.slice(0, n);
+  // neither cut may split an emoji in two
+  const whole = t => t.replace(/^[\uDC00-\uDFFF]|[\uD800-\uDBFF]$/g, "");
+  if (n < 6) return whole(s.slice(0, n));
   const tail = Math.floor((n - 1) * 0.4);
-  return s.slice(0, n - 1 - tail) + "…" + s.slice(s.length - tail);
+  return whole(s.slice(0, n - 1 - tail)) + "…" + whole(s.slice(s.length - tail));
 }
 
 // The longest length every label can keep so that all of them, joined by 3-character separators,

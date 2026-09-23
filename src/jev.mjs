@@ -60,11 +60,17 @@ export function apiKey() {
 const deadline = (signal, timeout) => (signal ? AbortSignal.any([signal, AbortSignal.timeout(timeout)]) : AbortSignal.timeout(timeout));
 const worthRetrying = status => status === 429 || status >= 500;
 
+// Page text is cut to size in many places, and a cut can land inside an emoji, leaving half of it.
+// The API refuses the whole request over that, so every string goes out whole, with any stray half
+// replaced by the replacement character.
+export const requestBody = (state, questions) =>
+  JSON.stringify({ state, model: MODEL, questions }, (key, value) => typeof value === "string" ? value.toWellFormed() : value);
+
 // questions map a name to { type: "noul" | "choice" | "score", instructions, criteria? }
 // signal: cancels the request and any retries (a caller's deadline); timeout bounds each attempt.
 export async function jev(state, questions, { retries = 2, timeout = 60_000, signal } = {}) {
   const key = apiKey();
-  const payload = JSON.stringify({ state, model: MODEL, questions });
+  const payload = requestBody(state, questions);
 
   for (let attempt = 0; true; attempt++) {
     const startedAt = performance.now();
