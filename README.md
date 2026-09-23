@@ -36,7 +36,7 @@ For its own browser, fetch Chromium once: `npx playwright install chromium`.
 Any other MCP client:
 
 ```bash
-claude mcp add barq -e TYPESAFE_API_KEY=your-key -- npx -y barq-mcp
+claude mcp add barq -e TYPESAFE_API_KEY=your-key -- npx -y -p barq barq-mcp
 ```
 
 The key can live in the macOS keychain instead:
