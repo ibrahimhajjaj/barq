@@ -39,6 +39,13 @@ Any other MCP client:
 claude mcp add barq -e TYPESAFE_API_KEY=your-key -- npx -y -p barq barq-mcp
 ```
 
+Or from a clone:
+
+```bash
+git clone https://github.com/ibrahimhajjaj/barq && cd barq && npm install
+claude mcp add barq -e TYPESAFE_API_KEY=your-key -- node "$PWD/bin/barq-mcp.mjs"
+```
+
 The key can live in the macOS keychain instead:
 `security add-generic-password -s typesafe-api-key -a "$USER" -w`.
 
