@@ -140,6 +140,44 @@ const SUMMARY_CHARS = 700, ALL_SUMMARIES = 36_000;
 // The site a host name belongs to, as password managers match logins by default: the name
 // registered under a public suffix, so mail.google.com is google.com while alice.github.io and
 // bob.github.io are two sites. A host without one (localhost, an IP address) stands for itself.
+// A form with several values to enter takes one round per field when each round types one. With
+// two or more values still to enter, the round also asks, for each of them, which field it goes in;
+// the ones Jev is sure of are all filled in that round. Values already typed in this step, and
+// secrets, are asked about too: a secret by its name only, as everywhere else.
+const MOST_BOUND = 6;
+function bindingQuestions(elements, values, history) {
+  const typed = new Set(history.filter(h => h.action === "type" && !h.error && h.value != null).map(h => h.value));
+  const keys = Object.keys(values).filter(k => !typed.has(k)).slice(0, MOST_BOUND);
+  const fields = elements.filter(e => FIELDISH(e) && !e.disabled && !SELECTISH(e));
+  if (keys.length < 2 || !fields.length) return { keys: [], questions: {} };
+  const criteria = { none: "No field on this page takes it", ...Object.fromEntries(fields.map(e => [String(e.i), null])) };
+  return {
+    keys,
+    questions: Object.fromEntries(keys.map((k, n) => [`bind_${n}`, {
+      type: "choice",
+      instructions: `Which field in \`page.elements\`, by its \`i\`, should \`task.values.${k}\` be typed into for \`task.goal\`? Answer none if no field on this page is meant for it.`,
+      criteria,
+    }])),
+  };
+}
+
+// The fields each value goes in, where Jev is sure and no two values claim one field. A password
+// goes only in a password field, and a password field takes only a password.
+function boundFields(page, answers, values) {
+  const byI = new Map(page.elements.map(e => [String(e.i), e]));
+  const isPasswordName = name => /pass|pwd/i.test(name), isPasswordField = e => e?.tag === "input:password";
+  const picks = (answers.bindKeys ?? []).map((key, n) => {
+    const a = answers[`bind_${n}`], choice = a?.choice, p = a?.probabilities?.[choice] ?? 0;
+    const el = byI.get(String(choice));
+    if (!el || choice === "none" || p < 0.85 || !FIELDISH(el) || el.disabled) return null;
+    if (isPasswordName(key) !== isPasswordField(el)) return null;
+    if (el.value != null && el.value === String(values[key])) return null;   // already there
+    return { key, el, p };
+  }).filter(Boolean);
+  const claimed = picks.map(x => x.el.i);
+  return picks.filter(x => claimed.indexOf(x.el.i) === claimed.lastIndexOf(x.el.i));
+}
+
 // A goal about time sees each date on the page with how far it is from today.
 function datesCounted(page) {
   const counted = e => (e.text || e.label) ? { ...e, ...(e.text ? { text: annotateDates(e.text) } : {}), ...(e.label ? { label: annotateDates(e.label) } : {}) } : e;
@@ -701,8 +739,9 @@ export class Barq {
     const onePage = asked === page.elements ? shown : { ...shown, elements: asked };
     if (asked.length <= MAX_SINGLE && estimateTokens(JSON.stringify(onePage)) <= SINGLE_STAGE_TOKENS) {
       targetQ.criteria = byNumber(asked);
-      const r = await this.call({ page: onePage, task }, { ...common, ...(asked.length ? { target: targetQ } : {}) });
-      return { ...r.answers, stages: 1, ...(asked.length < page.elements.length ? { elements_considered: asked.length } : {}) };
+      const binding = bindingQuestions(asked, values, history);
+      const r = await this.call({ page: onePage, task }, { ...common, ...(asked.length ? { target: targetQ } : {}), ...binding.questions });
+      return { ...r.answers, stages: 1, ...(binding.keys.length ? { bindKeys: binding.keys } : {}), ...(asked.length < page.elements.length ? { elements_considered: asked.length } : {}) };
     }
 
     // Otherwise in two: which run of elements holds the answer, then which element in those runs.
@@ -1833,6 +1872,21 @@ export class Barq {
           continue;
         }
       } else staleRounds = 0;
+
+      // Several values Jev placed with confidence: all of them go in now, each read back as it is
+      // typed, and the next round looks at the form with them in.
+      const fills = act.tool === "type" ? boundFields(page, a, values) : [];
+      if (fills.length >= 2) {
+        r.filled = fills.map(f => f.key);
+        for (const { key, el } of fills) {
+          const one = { tool: "type", target: el.i, el, value: values[key], valueKey: key };
+          const h = { action: "type", element: brief(el), value: key };
+          try { await this.act(one); } catch (e) { h.error = actionError(e); }
+          history.push(h);
+          if ((book || flow) && !h.error) steps.push(this.recipeStep(one, page, r, values));
+        }
+        continue;
+      }
 
       // questions that only make sense once the action is known
       // A goal's own words go into a search or a text field, never into a control that is offering

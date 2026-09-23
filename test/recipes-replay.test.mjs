@@ -663,3 +663,40 @@ test("still split after asking again, the step stops as ambiguous", async t => {
   const r = await b.do("Edit it", { recipe: false });
   assert.equal(r.status, "ambiguous");
 });
+
+const FORM = `<form><label>First name <input name="first"></label><label>Last name <input name="last"></label>
+  <label>Email <input name="email"></label><label>Password <input type="password" name="pw"></label><button type="button">Sign up</button></form>`;
+const LABELS = { first: "First name", last: "Last name", email: "Email", password: "Password" };
+
+test("values Jev places with confidence all go in one round, each where it belongs", async t => {
+  const { b } = await session(t, FORM);
+  const values = { first: "Ada", last: "Lovelace", email: "ada@example.com" };
+  const n = jev(b, (page, history) => {
+    if (history.filter(h => h.action === "type").length >= 3) return finished(0.95);
+    const field = name => el(page, e => e.label === LABELS[name]);
+    const bind = (name, p = 0.95) => ({ choice: String(field(name)), probabilities: { [field(name)]: p } });
+    return { ...answer({ tool: "type", target: field("first"), value: "first" }), bindKeys: ["first", "last", "email"],
+      bind_0: bind("first"), bind_1: bind("last"), bind_2: bind("email") };
+  });
+  const r = await b.do("Fill in the sign-up form", { values, recipe: false });
+  assert.equal(r.status, "done", r.info);
+  assert.equal(n.decide, 1, "one Jev round placed all three");
+  assert.deepEqual(r.rounds[0].filled, ["first", "last", "email"]);
+  assert.deepEqual(await b.page.$$eval("input:not([type=password])", l => l.map(x => x.value)), ["Ada", "Lovelace", "ada@example.com"]);
+});
+
+test("a value Jev is unsure of, or two values claiming one field, are left to the usual one-at-a-time", async t => {
+  const { b } = await session(t, FORM);
+  const values = { first: "Ada", last: "Lovelace", email: "ada@example.com", password: "s3cret" };
+  const typedPerRound = [];
+  jev(b, (page, history) => {
+    typedPerRound.push(history.filter(h => h.action === "type").length);
+    const field = name => el(page, e => e.label === LABELS[name]);
+    const bind = (name, p) => ({ choice: String(field(name)), probabilities: { [field(name)]: p } });
+    if (typedPerRound.length > 1) return finished(0.95);
+    return { ...answer({ tool: "type", target: field("first"), value: "first" }), bindKeys: ["first", "last", "email", "password"],
+      bind_0: bind("first", 0.95), bind_1: bind("first", 0.9), bind_2: bind("email", 0.5), bind_3: bind("first", 0.99) };
+  });
+  await b.do("Fill in the sign-up form", { values, recipe: false });
+  assert.deepEqual(typedPerRound, [0, 1], "nothing was filled in bulk; the round typed its one field");
+});

@@ -1129,3 +1129,19 @@ test("a snapshot can be cut down: to some words, without addresses, to what chan
   assert.equal(b2.shown.elements.find(e => e.i === n)?.text, "Checkout", "its number is the whole page's");
   await b2.close();
 });
+
+test("with two or more values still to enter, the round asks which field each goes in", async () => {
+  const b2 = await Barq.launch({ browser });
+  await b2.page.setContent(`<input name="first"><input name="last"><select><option>A</option></select><button>Go</button>`);
+  const pg = await b2.snapshot();
+  const asked = [];
+  b2.call = async (state, questions) => { asked.push(Object.keys(questions).filter(q => q.startsWith("bind_")).map(q => Object.keys(questions[q].criteria))); return { answers: clickAnswers(pg.elements[0].i) }; };
+  const values = { first: "Ada", last: "Lovelace" };
+  let r = await b2.decide(pg, "Fill in the names", values, []);
+  assert.deepEqual(r.bindKeys, ["first", "last"]);
+  const fields = pg.elements.filter(e => e.tag === "input:text").map(e => String(e.i));
+  assert.deepEqual(asked[0].map(c => c.sort()), [["none", ...fields].sort(), ["none", ...fields].sort()], "text fields only, never the dropdown or the button");
+  r = await b2.decide(pg, "Fill in the names", values, [{ action: "type", element: "x", value: "first" }]);
+  assert.equal(r.bindKeys, undefined, "one value left is the usual round");
+  await b2.close();
+});
