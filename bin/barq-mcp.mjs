@@ -23,6 +23,7 @@ import { scan } from "../src/scan.mjs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { stepEnvelope } from "../src/envelope.mjs";
+import { FIELDISH } from "../src/page-model.mjs";
 
 const config = browserConfig();
 // Attached to the user's own browser, let go of it after a while without calls: while connected,
@@ -87,7 +88,14 @@ function tool(fn, timeoutMs = 60_000) {
   };
 }
 
-const server = new McpServer({ name: "barq", version: "0.2.2" });
+const server = new McpServer({ name: "barq", version: "0.2.2" }, {
+  instructions: [
+    "barq drives a browser with a fast decision model choosing each click, so you read results, not pages.",
+    "Work in outcomes: browser_open, then one browser_do per outcome (\"Log in\", \"Fill in the sign-up form and submit it\"), with every value to type or pick in `values`. A whole form is one browser_do.",
+    "browser_snapshot and browser_act are for taking over when browser_do comes back ambiguous or stuck; acting field by field with them costs you a call per field.",
+    "browser_read answers questions from a page; browser_check asks yes or no about it.",
+  ].join("\n"),
+});
 
 server.registerTool("browser_open", {   // go to an address
   title: "Open URL",
@@ -105,7 +113,10 @@ server.registerTool("browser_open", {   // go to an address
   // a count is not a listing: no element numbers went back to the caller, so acting on one now
   // would be acting on a number remembered from somewhere else
   b.shown = null;
-  return { ...r, elements: page.elements.length, visible_text: page.text.slice(0, 400), ...await siteToolNames(b) };
+  const fields = page.elements.filter(FIELDISH).length;
+  // a form is filled in one browser_do with every value, not a browser_act per field
+  const hint = fields >= 3 ? { hint: `a form with ${fields} fields: fill it with one browser_do, every value in values` } : {};
+  return { ...r, elements: page.elements.length, visible_text: page.text.slice(0, 400), ...hint, ...await siteToolNames(b) };
 }));
 
 server.registerTool("browser_do", {   // one outcome, Jev choosing each action
@@ -114,7 +125,8 @@ server.registerTool("browser_do", {   // one outcome, Jev choosing each action
   description: [
     "Reach ONE outcome you could see on the current page. A fast decision model, Jev, chooses every element, action and value; it can't plan or write text, so:",
     "- Give one outcome per call (\"Log in\", \"Put the Backpack in the cart\", \"Open the Pull requests tab\"); steps that must happen in order are separate calls.",
-    "- Everything to type, every option to pick and every file to upload goes in `values`, under names that say what it is ({email, password}).",
+    "- Everything to type, every option to pick and every file to upload goes in `values`, under names that say what it is ({email, password}). A whole form is ONE call: \"Fill in the sign-up form and submit it\" with every field in `values` fills them together, far cheaper than a browser_act per field.",
+    "- Waiting is part of a step: \"Wait for the report to finish, then open it\" waits as long as the page is visibly working. Keep the whole outcome in one call rather than splitting the waiting off.",
     "- For secrets, pass a reference instead of the secret: \"keychain:<service>[/<account>]\", \"bw:<item>[/password|/username|/totp]\" (Bitwarden CLI), \"env:<NAME>\", or \"autofill\" to let the browser's password manager fill the field (\"autofill:<account>\" picks one of several saved logins by part of its name or username; with several and none named, the step stops with needs_login and lists them in `accounts`). Values whose names look secret (password, pin, otp, token, card...) and all references are never shown to the decision model or returned.",
     "- Give an open-ended goal an end you can count (\"until at least 3 new results are shown\").",
     "Statuses: done | likely_done (Jev is unsure the goal is met: verify with browser_check or browser_snapshot before moving on) | needs_login (sign-in wall and no credentials given: ask the user to log in, or pass credentials in values) | needs_confirmation (next click looks irreversible: re-call with the same goal and values and allow_irreversible=true only if the user wants it; it goes on from where it stopped) | error (page shows an error) | blocked | stuck | ambiguous (see candidates; use browser_act) | max_actions | timeout (ran out of time; see actions).",
