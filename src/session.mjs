@@ -19,6 +19,7 @@ import { commitsSomething, COMMITTING_TOOLS } from "./safety.mjs";
 import { forJev, resolveValue, autofillAccount } from "./secrets.mjs";
 import { SiteTools } from "./webmcp.mjs";
 import { describe, place, recipeKey, findElement, fingerprint, matches, valuesPrint } from "./recipes.mjs";
+import { ABOUT_TIME, annotateDates } from "./dates.mjs";
 
 const sleep = ms => new Promise(done => setTimeout(done, ms));
 
@@ -139,6 +140,12 @@ const SUMMARY_CHARS = 700, ALL_SUMMARIES = 36_000;
 // The site a host name belongs to, as password managers match logins by default: the name
 // registered under a public suffix, so mail.google.com is google.com while alice.github.io and
 // bob.github.io are two sites. A host without one (localhost, an IP address) stands for itself.
+// A goal about time sees each date on the page with how far it is from today.
+function datesCounted(page) {
+  const counted = e => (e.text || e.label) ? { ...e, ...(e.text ? { text: annotateDates(e.text) } : {}), ...(e.label ? { label: annotateDates(e.label) } : {}) } : e;
+  return { ...page, text: annotateDates(page.text), elements: page.elements.map(counted) };
+}
+
 export function siteOf(host) {
   const h = host.toLowerCase();
   return getDomain(h, { allowPrivateDomains: true }) ?? h;
@@ -664,6 +671,7 @@ export class Barq {
   // Enough of a page to tell whether the one a decision was made on is still the one in front of
   // us: its address, how much text and how many controls it has, and what they are called.
   async decide(page, goal, values, history, lastChange, count) {
+    if (ABOUT_TIME.test(goal)) page = datesCounted(page);
     const jevValues = forJev(values);   // names always, contents only when not secret
     const task = {
       goal,

@@ -1095,3 +1095,16 @@ test("a field the form requires, and one it has refused, say so", async () => {
   assert.equal(by("city").required ?? by("city").invalid, undefined);
   await b2.close();
 });
+
+test("a goal about time sees how far each date is from today; any other goal sees the page as it is", async () => {
+  const b2 = await Barq.launch({ browser });
+  await b2.page.setContent(`<h2>Events</h2><p>Launch party, October 20, 2099</p><a href="#">RSVP</a>`);
+  const pg = await b2.snapshot();
+  const seen = [];
+  b2.call = async state => { seen.push(state.page.text); return { answers: clickAnswers(pg.elements[0].i) }; };
+  await b2.decide(pg, "RSVP to the next upcoming event", {}, []);
+  await b2.decide(pg, "RSVP to the launch party", {}, []);
+  assert.match(seen[0], /October 20, 2099 \(in \d+ days\)/);
+  assert.doesNotMatch(seen[1], /days\)/);
+  await b2.close();
+});
