@@ -550,3 +550,18 @@ test("a decision about an element that left the page while it was being made is 
   assert.ok(r.actions.some(h => h.event?.includes("left the page")), "said why it looked again");
   assert.ok(Date.now() - started < 3000, "no waiting out a click on an element that is gone");
 });
+
+test("a button whose words change while Jev decides is not pressed on the old decision", async t => {
+  const { b } = await session(t, `<button onclick="document.body.dataset.pressed = this.textContent">Continue</button>`);
+  let round = 0;
+  jev(b, async page => {
+    const target = el(page, e => e.tag === "button");
+    // the page relabels the button while Jev is still deciding about "Continue"
+    if (round++ === 0) await b.page.evaluate(() => { document.querySelector("button").textContent = "Delete account"; });
+    return answer({ target });
+  });
+  const r = await b.do("Continue to the next page", { recipe: false });
+  assert.equal(r.status, "needs_confirmation", r.info);
+  assert.equal(await b.page.evaluate(() => document.body.dataset.pressed ?? null), null, "nothing was pressed");
+  assert.ok(r.actions.some(h => h.event?.includes('now says "Delete account"')), "it said why it looked again");
+});

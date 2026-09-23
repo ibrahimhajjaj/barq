@@ -1667,11 +1667,18 @@ export class Barq {
       }
 
       // The page moved on while Jev was deciding: the element it chose has gone, because the page
-      // navigated or redrew that part. Acting would wait out a click that can't land, so the page is
-      // looked at again instead, twice at most in a row.
-      if (act.target != null && !(await this.locate(act.target).count().catch(() => 0))) {
+      // navigated or redrew that part, or it is still there and now says something else, a button
+      // that read "Continue" when it was chosen and reads "Delete account" when it would be pressed.
+      // What was decided was the page as it was, so the page is looked at again instead, twice at
+      // most in a row. Acting on a changed label is how a harmless step becomes an irreversible one.
+      const gone = act.target != null && !(await this.locate(act.target).count().catch(() => 0));
+      const reworded = !gone && act.target != null && act.el?.text ? await this.locate(act.target).evaluate((el, was) => {
+        const now = (el.innerText || "").replace(/\s+/g, " ").trim();
+        return now && !now.startsWith(was.slice(0, 40)) && !was.startsWith(now.slice(0, 40)) ? now.slice(0, 60) : null;
+      }, act.el.text).catch(() => null) : null;
+      if (gone || reworded) {
         if (++staleRounds <= 2) {
-          history.push({ event: `${brief(act.el)} left the page while the step was deciding` });
+          history.push({ event: gone ? `${brief(act.el)} left the page while the step was deciding` : `${brief(act.el)} now says "${reworded}": it changed while the step was deciding` });
           continue;
         }
       } else staleRounds = 0;
