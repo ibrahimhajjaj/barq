@@ -271,7 +271,7 @@ export function repeatedElements(elements) {   // controls that come many times 
 }
 
 const NAMES_SHOWN = ["label", "text", "placeholder", "name"];
-const FLAGS_SHOWN = ["checked", "filled", "editable", "disabled", "busy", "expanded", "active", "hidden", "covered"];
+const FLAGS_SHOWN = ["checked", "filled", "editable", "disabled", "required", "invalid", "busy", "expanded", "active", "hidden", "covered"];
 const OPTIONS_SHOWN = 8;
 
 function elementLine(e) {

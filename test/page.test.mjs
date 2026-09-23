@@ -1082,3 +1082,16 @@ test("an upload button with no file input behind it gets the file through the pi
   assert.equal(await b2.page.evaluate(() => document.body.dataset.got), "page.test.mjs");
   await b2.close();
 });
+
+test("a field the form requires, and one it has refused, say so", async () => {
+  const b2 = await Barq.launch({ browser });
+  await b2.page.setContent(`<form><input name="email" required>
+    <input name="phone" aria-invalid="true" aria-errormessage="err"><p id="err">Enter a phone number with the country code</p>
+    <input name="city"></form>`);
+  const els = (await b2.snapshot()).elements, by = n => els.find(e => e.name === n);
+  assert.equal(by("email").required, true);
+  assert.equal(by("email").invalid, undefined, "nothing was refused before anyone typed");
+  assert.equal(by("phone").invalid, "Enter a phone number with the country code");
+  assert.equal(by("city").required ?? by("city").invalid, undefined);
+  await b2.close();
+});

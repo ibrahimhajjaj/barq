@@ -186,6 +186,13 @@ export const ENUMERATE = ({ start, frame }) => {   // start: the first number to
     }
     if (el.getAttribute("aria-disabled") === "true" || el.disabled) o.disabled = true;
     if (["true"].includes(el.getAttribute("aria-busy"))) o.busy = true;
+    // What a form will refuse, and what it already refused: a required field left empty is why a
+    // Submit "does nothing", and a field the page marked wrong is why a step has to go back to it.
+    if (el.required || el.getAttribute("aria-required") === "true") o.required = true;
+    const refused = el.getAttribute("aria-invalid");
+    if ((refused && refused !== "false") || el.matches?.(":user-invalid")) {
+      o.invalid = tidy(el.validationMessage || document.getElementById(el.getAttribute("aria-errormessage") ?? "")?.innerText || "", 80) || true;
+    }
 
     const sort = el.getAttribute("aria-sort") || classOf(el).match(/sort\w*?(asc|desc|up|down)/i)?.[1];
     if (sort && sort !== "none") o.sorted = /asc|up/i.test(sort) ? "ascending" : /desc|down/i.test(sort) ? "descending" : sort;
