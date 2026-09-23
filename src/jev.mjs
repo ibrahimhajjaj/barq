@@ -11,6 +11,9 @@ const DEFAULT_API_URL = "https://api.typesafe.ai/v1/systemone";
 export const API_URL = process.env.JEV_API_URL || DEFAULT_API_URL;
 // A pinned version: the thresholds in session.mjs were tuned against it, and "jev-latest" moves.
 export const MODEL = process.env.JEV_MODEL || "jev-1.13.0";
+// TypeSafe's published price: input tokens only, answers are free. Set JEV_PRICE_PER_M if it changes.
+export const PRICE_PER_MILLION = Number(process.env.JEV_PRICE_PER_M) || 0.042;
+export const costOf = tokens => +(tokens * PRICE_PER_MILLION / 1e6).toFixed(6);
 export const KEYCHAIN_SERVICE = process.env.JEV_KEYCHAIN_SERVICE || "typesafe-api-key";
 
 const ENV_VAR = "TYPESAFE_API_KEY";

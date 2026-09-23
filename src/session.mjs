@@ -11,7 +11,7 @@
 // where to drop, which option, or a stricter "finished?" when the first answers disagree.
 import { chromium } from "playwright";
 import { getDomain } from "tldts";
-import { jev } from "./jev.mjs";
+import { jev, costOf } from "./jev.mjs";
 import { ENUMERATE } from "./page-script.mjs";
 import { FIELDISH, SELECTISH, FILEISH, brief, likelyFor, phrasesFrom, plainGoal, goalMet, mentions, pageDiff, repeatedElements, formatPage, clipMiddle, optionSummary, numbersIn, kindsOf, countKind, mayCount } from "./page-model.mjs";
 import { readBlocks, toText, passages, findPassages } from "./reader.mjs";
@@ -1451,7 +1451,7 @@ export class Barq {
 
   // recipe: false neither replays nor records for this call.
   async runGoal(goal, { values = {}, maxActions = 10, doneAt = 0.5, minTarget = 0.3, allowIrreversible = false, irreversibleAt = 0.6, log = () => {}, recipe = true } = {}) {
-    const t0 = Date.now(), calls0 = this.stats.calls;
+    const t0 = Date.now(), calls0 = this.stats.calls, tokens0 = this.stats.tokens;
     this.pageErrors.length = 0;
     const history = [], rounds = [];
     let prevPage = null, waits = 0, page = null, status = "max_actions", info, pending, accounts, retried = false;
@@ -1485,7 +1485,7 @@ export class Barq {
     // A caller can have a shorter deadline than the step does, and an action that overruns leaves
     // the step still inside a round when that deadline lands. Everything it has done so far lives
     // in these arrays, so hand them out rather than let the work vanish into a one-line error.
-    this.progress = { goal, actions: history, rounds, before: 0, startedAt: t0, callsBefore: calls0 };
+    this.progress = { goal, actions: history, rounds, before: 0, startedAt: t0, callsBefore: calls0, tokensBefore: tokens0 };
     try {
     // A goal that counts from what the page has ("load 5 more results") takes that count before
     // it acts, and a replay would already have added to it: such goals neither replay nor record.
@@ -1851,6 +1851,8 @@ export class Barq {
       actions: history.slice(before),
       rounds,
       jev_calls: this.stats.calls - calls0,
+      jev_tokens: this.stats.tokens - tokens0,
+      jev_cost_usd: costOf(this.stats.tokens - tokens0),
       ms: Date.now() - t0,
       ...(info ? { info } : {}),
       ...(pending ? { pending } : {}),
@@ -1903,6 +1905,8 @@ export class Barq {
       ...(last?.candidates ? { candidates: last.candidates } : {}),
       info: "the caller's time limit ran out while the step was still going; this is what it had done by then",
       jev_calls: this.stats.calls - p.callsBefore,
+      jev_tokens: this.stats.tokens - p.tokensBefore,
+      jev_cost_usd: costOf(this.stats.tokens - p.tokensBefore),
       ms: Date.now() - p.startedAt,
     };
   }

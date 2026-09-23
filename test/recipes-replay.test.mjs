@@ -595,3 +595,13 @@ test("what the site's own code reported going wrong comes back with the step", a
   assert.deepEqual(r.page_errors?.map(e => e.kind).sort(), ["console", "error"], JSON.stringify(r.page_errors));
   assert.ok(r.page_errors.some(e => e.text.includes("addItem failed")));
 });
+
+test("a step counts the Jev tokens it spent and what they cost", async t => {
+  const { b } = await session(t, `<button>Go</button>`);
+  jev(b, (page, history) => did(history, "Go") ? finished(0.95) : answer({ target: el(page, e => e.text === "Go") }));
+  const decide = b.decide;
+  b.decide = async (...a) => { b.stats.tokens += 5000; return decide(...a); };
+  const r = await b.do("Press Go", { recipe: false });
+  assert.equal(r.jev_tokens, 10000);
+  assert.equal(r.jev_cost_usd, 0.00042);
+});
