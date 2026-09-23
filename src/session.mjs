@@ -767,8 +767,12 @@ export class Barq {
 
     const text = await resolveValue(act.value);
     await loc.fill("", opts);
-    if (text.length <= 120) await loc.pressSequentially(text, { delay: 5, ...opts });
-    else await loc.fill(text, opts);
+    // Some editors take a quarter of a second over each key, and a title typed key by key runs out
+    // of time halfway, leaving the field cut short. Whatever the keys didn't finish is filled in
+    // one go instead, which is the whole value.
+    let typed = true;
+    if (text.length <= 120) typed = await loc.pressSequentially(text, { delay: 5, ...opts }).then(() => true, e => { if (/timeout/i.test(e?.name ?? "") || /Timeout/.test(e?.message ?? "")) return false; throw e; });
+    if (!typed || text.length > 120) await loc.fill(text, opts);
     // a masked or otherwise fussy field may have taken something else: put it right in one go
     const inField = await loc.inputValue({ timeout: 1000 }).catch(() => null);
     if (inField !== null && inField !== text) await loc.fill(text, opts);

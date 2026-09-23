@@ -1,4 +1,5 @@
-// Offline tests: text that is cut to size never leaves half an emoji behind. No Jev calls.
+// Offline tests: text that is cut to size never leaves half an emoji behind, and a slow editor
+// still ends up holding the whole value. No Jev calls.
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
 import { chromium } from "playwright";
@@ -30,4 +31,14 @@ test("what the page is read as holds no half emoji, however a label is cut", asy
   const page = await b.snapshot();   // as it stands now
   for (const e of page.elements) for (const v of [e.text, e.label]) if (v) assert.ok(whole(v), v);
   assert.ok(whole(page.text));
+});
+
+test("an editor too slow to type into key by key still ends up with the whole value", async () => {
+  // every key costs the page 300 ms, so 30 of them outlast the time an action gets
+  await b.page.setContent(`<textarea id=t></textarea><script>
+    document.getElementById("t").addEventListener("keydown", () => { const until = Date.now() + 300; while (Date.now() < until); });
+  </script>`);
+  const value = "barq: one sentence per step!!";
+  await b.typeInto(b.page.locator("#t"), { value }, { timeout: 4000 });
+  assert.equal(await b.page.inputValue("#t"), value);
 });
