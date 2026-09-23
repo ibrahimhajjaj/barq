@@ -9,6 +9,10 @@ export const ENUMERATE = ({ start, frame }) => {   // start: the first number to
     "[role=textbox]", "[role=searchbox]", "[role=slider]",
     '[contenteditable=""]', "[contenteditable=true]",
     "[onclick]", "[oncontextmenu]", "[ondblclick]", "[draggable=true]",
+    "[onmousedown]", "[onmouseup]", "[onpointerdown]", "[onpointerup]",
+    // a link with no address whose script wakes up under the mouse: it becomes the real control
+    // as the pointer arrives, so it is a control already
+    "a[onmouseenter]", "a[onmouseover]",
     '[tabindex]:not([tabindex="-1"])',
   ].join(", ");
   const TICKABLE = ["checkbox", "radio"];

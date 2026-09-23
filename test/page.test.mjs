@@ -1164,3 +1164,14 @@ test("a canvas has no elements, so a point read off a gridded screenshot is acte
   assert.equal(held.status, "needs_confirmation");
   await b2.close();
 });
+
+test("a link with no address that its script arms under the mouse is listed", async () => {
+  const b2 = await Barq.launch({ browser });
+  await b2.page.setContent(`<a class="text-primary" title="Click me" onmouseenter="this.onclick = () => document.body.dataset.n = (+document.body.dataset.n || 0) + 1">Click me</a>
+    <span onmouseenter="this.title = 'tip'">just a tooltip</span><div onmousedown="1">Drag handle</div>`);
+  const els = (await b2.snapshot()).elements;
+  assert.ok(els.some(e => e.text === "Click me"));
+  assert.ok(els.some(e => e.text === "Drag handle"));
+  assert.ok(!els.some(e => e.text === "just a tooltip"), "a hover on anything but a link is not a control");
+  await b2.close();
+});
