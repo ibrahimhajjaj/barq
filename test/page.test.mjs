@@ -1059,3 +1059,12 @@ test("a big page keeps the controls whose section the goal names, and Jev never 
   assert.ok(sent.page.elements.every(e => !("section" in e)), "no section heading in what Jev reads");
   await b2.close();
 });
+
+test("a link a router handles, with no href, is listed like any other link", async () => {
+  const b2 = await Barq.launch({ browser });
+  await b2.page.setContent(`<nav><a style="cursor:pointer">Settings</a></nav><input type="file" hidden>`);
+  await b2.page.evaluate(() => document.querySelector("nav a").addEventListener("click", () => { location.hash = "settings"; }));
+  const els = (await b2.snapshot()).elements;
+  assert.ok(els.some(e => e.text === "Settings"), JSON.stringify(els));
+  await b2.close();
+});

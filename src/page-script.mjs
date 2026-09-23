@@ -46,7 +46,7 @@ export const ENUMERATE = ({ start, frame }) => {   // start: the first number to
     if (["html", "body", "label", "svg", "path"].includes(tag) || !el.parentElement) return false;
     return getComputedStyle(el).cursor === "pointer"
       && getComputedStyle(el.parentElement).cursor !== "pointer"
-      && !el.closest("a, button, [role=button]");
+      && !el.parentElement.closest("a, button, [role=button]");
   };
 
   // Table headers are usually sortable, and a sizeable image is a hover target or a link's content.
