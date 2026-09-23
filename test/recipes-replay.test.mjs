@@ -835,3 +835,16 @@ test("a page that takes a quarter of a minute to finish is waited on while Jev a
   const r = await b.do("Start it and wait for the data", { recipe: false, maxActions: 20 });
   assert.equal(r.status, "done", r.info);
 });
+
+test("with the goal half met, a next step that may be hard to undo is held even under the usual line", async t => {
+  const { b } = await session(t, `<p>Checkout: overview</p><button onclick="document.body.dataset.ordered = 1">Finish</button>`);
+  jev(b, page => ({ ...answer({ target: el(page, e => e.text === "Finish"), done: 0.57, irreversible: 0.59 }) }));
+  b.call = async () => ({ answers: { complete: { noul: 0.37 }, q: { noul: 0.37 } } });
+  // as if one round went by already: the step continued to the overview
+  const decide = b.decide; let first = true;
+  b.decide = async (...x) => { const a = await decide(...x); if (first) { first = false; return { ...a, done: { noul: 0 }, done_change: { noul: 0 }, tool: { choice: "wait", probabilities: { wait: 0.9 } } }; } return a; };
+  const r = await b.do("Fill in the checkout information and continue", { recipe: false });
+  assert.equal(r.status, "likely_done", r.info);
+  assert.equal(r.pending?.element, 'button "Finish"');
+  assert.equal(await b.page.getAttribute("body", "data-ordered"), null, "the order was not placed");
+});

@@ -180,6 +180,7 @@ function boundFields(page, answers, values) {
 
 const COMMIT_MEMORY_MS = 30 * 60_000;
 const WAIT_BUDGET_MS = 30_000;
+const NEAR_IRREVERSIBLE = 0.4;
 // The words a goal ends on when what it wants last is to send a form it has filled.
 const SENDS = new Set(["submit", "send", "save", "register", "apply", "create", "sign", "continue", "confirm", "finish"]);
 const firedAgain = (at, action, element) => ({
@@ -1860,6 +1861,16 @@ export class Barq {
           status = "done";
           info = "stopped before an action that looks irreversible and may go beyond this goal";
           pending = { action: act.tool, element: brief(act.el), p_irreversible: r.irreversible, ...(commits ? { because: `"${commits}"` } : {}) };
+          break;
+        }
+        // The goal already half looks met, so the next action is more likely to go past it than to
+        // finish it, and one that may be hard to undo needs less to hold it back: a checkout's
+        // Finish scored 0.59 once, a hair under the line, on a step that only asked to continue.
+        // Held, it is named rather than claimed: the caller decides whether the goal needs it.
+        if (GUARDED.has(act.tool) && a.irreversible.noul >= NEAR_IRREVERSIBLE) {
+          status = "likely_done";
+          info = `stopped before ${brief(act.el)}, which may be hard to undo and may go beyond this goal; if the goal needs it, call again with allow_irreversible`;
+          pending = { action: act.tool, element: brief(act.el), p_irreversible: r.irreversible };
           break;
         }
       } else if (done >= (round > 0 ? doneAt : 0.9) && (done >= 0.85 || act.tool === "none" || round === 0)) {
