@@ -18,6 +18,13 @@ const DOT_ENV_LINE = /^\s*(?:export\s+)?([A-Z_]+)\s*=\s*"?([^"\s]+)"?/;
 const pause = ms => new Promise(done => setTimeout(done, ms));
 // a little longer each time, so a rate limit has a chance to clear
 const backoffMs = attempt => 800 * (attempt + 1);
+// A busy service says how long to stay away. Waiting less just spends a retry on another refusal;
+// waiting longer than a step can afford is capped, and the caller's own deadline still applies.
+const retryAfterMs = header => {
+  if (!header) return null;
+  const seconds = /^\d+(\.\d+)?$/.test(header.trim()) ? Number(header) : (Date.parse(header) - Date.now()) / 1000;
+  return Number.isFinite(seconds) ? Math.min(Math.max(seconds * 1000, 0), 15_000) : null;
+};
 
 // GUI apps on macOS don't inherit variables exported in shell profiles, so an MCP server they
 // spawn can't count on the environment. The login keychain works for both, and keeps the key
@@ -115,7 +122,7 @@ export async function jev(state, questions, { retries = 2, timeout = 60_000, sig
     if (res.ok && attempt < retries) { await pause(backoffMs(attempt)); continue; }
     if (res.ok) throw new Error(fault ? `Jev answered out of shape: ${fault}` : "Jev returned a response without answers");
     if (attempt < retries && worthRetrying(res.status)) {
-      await pause(backoffMs(attempt));
+      await pause(retryAfterMs(res.headers.get("retry-after")) ?? backoffMs(attempt));
       continue;
     }
 
