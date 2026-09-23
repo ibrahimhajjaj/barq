@@ -565,3 +565,25 @@ test("a button whose words change while Jev decides is not pressed on the old de
   assert.equal(await b.page.evaluate(() => document.body.dataset.pressed ?? null), null, "nothing was pressed");
   assert.ok(r.actions.some(h => h.event?.includes('now says "Delete account"')), "it said why it looked again");
 });
+
+test("a browser check that lets the browser through by itself is waited out, not called blocked", async t => {
+  const { b } = await session(t, `<title>Just a moment...</title><p>Checking your browser before accessing the shop.</p>
+    <script>setTimeout(() => { document.title = "Shop"; document.body.innerHTML = "<button onclick=\\"this.textContent='Added'\\">Add to basket</button>"; }, 4000)</script>`);
+  jev(b, (page, history) => {
+    if (did(history, "Add to basket")) return finished(0.95);
+    const add = page.elements.find(e => e.text === "Add to basket");
+    return add ? answer({ target: add.i }) : { ...answer({ tool: "none" }), blocked: { noul: 0.9 } };
+  });
+  const r = await b.do("Add the item to the basket", { recipe: false });
+  assert.equal(r.status, "done", r.info);
+  assert.equal(await b.page.textContent("button"), "Added");
+});
+
+test("a real wall is still blocked", async t => {
+  const { b } = await session(t, `<title>Access denied</title><p>You don't have permission to access this page.</p>`);
+  jev(b, () => ({ ...answer({ tool: "none" }), blocked: { noul: 0.95 } }));
+  const started = Date.now();
+  const r = await b.do("Open the shop", { recipe: false });
+  assert.equal(r.status, "blocked");
+  assert.ok(Date.now() - started < 5000, "no wait for a page that isn't a browser check");
+});

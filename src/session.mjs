@@ -894,6 +894,20 @@ export class Barq {
     return loc.selectOption({ index: act.optionIndex, label }, opts);
   }
 
+  // A "checking your browser" page usually lets a real browser through by itself within a few
+  // seconds. Calling that blocked sends the caller away from a site that was about to open, so it is
+  // given up to 8 seconds to clear, once per step. True when the page moved on.
+  async wallClears() {
+    const WALL = /just a moment|checking your browser|verify(ing)? you are (a )?human|one more step|ddos protection|please wait while we/i;
+    const looks = () => this.page.evaluate(() => document.title + " " + (document.body?.innerText ?? "").slice(0, 400)).catch(() => "");
+    if (!WALL.test(await looks())) return false;
+    for (const until = Date.now() + 8000; Date.now() < until;) {
+      await sleep(500);
+      if (!WALL.test(await looks())) { await this.settle({ max: 3000 }); return true; }
+    }
+    return false;
+  }
+
   async perform(act) {
     const wantsTarget = TARGETED.has(act.tool) || (act.tool === "press_key" && act.target != null);
     if (wantsTarget && act.target == null) throw new Error(`${act.tool} needs a target element`);
@@ -1420,7 +1434,7 @@ export class Barq {
     let echoedGoal = false;
     const seen = new Map();
     // the element the last action went to, and a list field typed into without choosing from it
-    let acted = null, typed = null, pressedEnding = false, staleRounds = 0;
+    let acted = null, typed = null, pressedEnding = false, staleRounds = 0, waitedOnWall = false;
     ({ prompt: this.promptText } = values);
     this.loginIntent(values);
     // The call right after this goal stopped for confirmation goes on with the same flow: a recipe
@@ -1636,10 +1650,22 @@ export class Barq {
             break;
           }
         }
+        if (a.blocked.noul >= 0.5 && !waitedOnWall && (waitedOnWall = true) && await this.wallClears()) {
+          history.push({ event: "a browser check cleared by itself" });
+          continue;
+        }
         status = a.blocked.noul >= 0.5 ? "blocked" : "stuck";
         break;
       }
-      if (a.blocked.noul >= 0.85) { status = "blocked"; break; }   // a captcha or a wall, not something to click through
+      // a captcha or a wall, not something to click through, unless it is the kind that lets the
+      // browser through on its own
+      if (a.blocked.noul >= 0.85) {
+        if (!waitedOnWall && (waitedOnWall = true) && await this.wallClears()) {
+          history.push({ event: "a browser check cleared by itself" });
+          continue;
+        }
+        status = "blocked"; break;
+      }
 
       if (act.tool === "wait") {
         if (++waits > 6) { status = "stuck"; info = "the page never finished loading"; break; }
