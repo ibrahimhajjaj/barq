@@ -1,6 +1,6 @@
 {
   "name": "barq-mcp",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "description": "Fast browser hands for coding agents: the agent names an outcome, Jev (TypeSafe's decision model) picks each click in about 300 ms. MCP server, Claude Code plugin, library and CLI; works in a browser it launches or in your own Chrome or Edge.",
   "keywords": [
     "barq",

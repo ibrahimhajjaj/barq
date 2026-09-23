@@ -97,7 +97,7 @@ function tool(fn, timeoutMs = 60_000) {
   };
 }
 
-const server = new McpServer({ name: "barq", version: "0.2.1" });
+const server = new McpServer({ name: "barq", version: "0.2.2" });
 
 server.registerTool("browser_open", {   // go to an address
   title: "Open URL",
