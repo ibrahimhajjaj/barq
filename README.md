@@ -3,6 +3,12 @@
 Barq is fast AI browser automation for coding agents, powered by TypeSafe Jev and Playwright.
 You name the outcome, Jev picks each click in about 300 ms, and your agent never reads page dumps.
 
+
+
+https://github.com/user-attachments/assets/4ea8029e-94e5-4979-b378-a25fc3c3fe79
+
+
+
 ```
 browser_do("Log in", { username: "autofill", password: "autofill" })
   → { status: "done", url: "https://portal.example.com/home", actions: [...] }
