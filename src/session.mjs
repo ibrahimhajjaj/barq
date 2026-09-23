@@ -326,7 +326,7 @@ export class Barq {
       if (type === "script") {
         try { if (siteOf(new URL(r.url()).hostname) !== siteOf(new URL(r.frame().url()).hostname)) young = 1000; } catch {}
       }
-      this.inflight.set(r, { at: Date.now(), young }); this.wakeSettle();
+      this.inflight.set(r, { at: Date.now(), young, type }); this.wakeSettle();
     };
     const untrack = r => { if (this.inflight.delete(r)) this.wakeSettle(); };
     p.on("request", track); p.on("requestfinished", untrack); p.on("requestfailed", untrack);
@@ -1089,6 +1089,21 @@ export class Barq {
     return waitForUserS ? "nobody got past the check in time; it is still in the tab" : "a captcha or check only a person can pass; call again with wait_for_user_s and it is put in front of the user to solve";
   }
 
+  // A data request the page sent after the last action and is still waiting on: the answer it is
+  // loading, not a long-poll, since it started because of what was just done. When Jev sees nothing
+  // to do meanwhile, the page is waited on, up to `ms`, and looked at again. True if there was one.
+  async requestsFinish(ms) {
+    const since = this.lastActionAt ?? 0;
+    const pending = () => [...this.inflight].filter(([, v]) => v.at >= since && ["fetch", "xhr"].includes(v.type)).length;
+    if (!pending()) return false;
+    for (const until = Date.now() + ms; Date.now() < until && pending();) {
+      if (this.abort?.signal.aborted || this.callSignal?.aborted) return false;
+      await sleep(250);
+    }
+    await this.settle({ max: 4000 });
+    return true;
+  }
+
   // A captcha is for a person, and barq never answers one. In a browser someone can see, the tab
   // is put in front of them and the step waits, up to `seconds` over the whole step, for the page
   // to change. It stays in front until the step ends, so the person isn't pulled away mid-check.
@@ -1692,7 +1707,7 @@ export class Barq {
     let echoedGoal = false;
     const seen = new Map();
     // the element the last action went to, and a list field typed into without choosing from it
-    let acted = null, typed = null, pressedEnding = false, staleRounds = 0, waitedOnWall = false, lastAct = null, beforeSave = null;
+    let acted = null, typed = null, pressedEnding = false, staleRounds = 0, waitedOnWall = false, lastAct = null, beforeSave = null, waitedOnRequests = false;
     ({ prompt: this.promptText } = values);
     this.loginIntent(values);
     // The call right after this goal stopped for confirmation goes on with the same flow: a recipe
@@ -1902,6 +1917,10 @@ export class Barq {
         if (open) {
           await this.confirmPicker(open, history);
           acted = null;
+          continue;
+        }
+        if (!waitedOnRequests && (waitedOnRequests = true) && await this.requestsFinish(30_000)) {
+          history.push({ event: "waited for the data the page was still loading" });
           continue;
         }
         if (dropped) {

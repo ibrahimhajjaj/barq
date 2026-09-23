@@ -811,3 +811,19 @@ test("a save whose new record lacks a typed value is left for the caller to chec
   const r = await saveContact(t, true);
   assert.equal(r.status, "likely_done", r.info);
 });
+
+test("data the page is still loading after a click is waited for before the step gives up", async t => {
+  const { b } = await session(t, "");
+  await b.page.route("https://slow.test/**", async route => {
+    if (new URL(route.request().url()).pathname === "/data") { await new Promise(done => setTimeout(done, 7000)); return route.fulfill({ body: "Data loaded with AJAX get request." }); }
+    return route.fulfill({ contentType: "text/html", body: `<button onclick="fetch('/data').then(r => r.text()).then(t => { document.getElementById('out').textContent = t })">Load data</button><p id="out"></p>` });
+  });
+  await b.open("https://slow.test/");
+  jev(b, (page, history) => {
+    if (page.text.includes("Data loaded")) return finished(0.95);
+    return did(history, "Load data") ? answer({ tool: "none" }) : answer({ target: el(page, e => e.text === "Load data") });
+  });
+  const r = await b.do("Load the data and wait for it to appear", { recipe: false, timeoutMs: 40_000 });
+  assert.equal(r.status, "done", r.info);
+  assert.match(await b.page.textContent("#out"), /Data loaded/);
+});
