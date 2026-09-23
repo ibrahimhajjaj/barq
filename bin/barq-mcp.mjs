@@ -22,6 +22,7 @@ import { TraceLog, traceDir } from "../src/trace.mjs";
 import { scan } from "../src/scan.mjs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
+import { stepEnvelope } from "../src/envelope.mjs";
 
 const config = browserConfig();
 // Attached to the user's own browser, let go of it after a while without calls: while connected,
@@ -49,23 +50,11 @@ async function siteToolNames(b) {
   return names.length ? { site_tools: names } : {};
 }
 
+const BLANK_TAB = "this tab is blank: barq drives the tabs it opens itself and cannot see the ones you already have open, so send it to the page with browser_open first";
+
 // Runs fn in the session's tab, stopping it if the client cancels the request. Plain objects come
 // back as JSON with the session name (when not "main") and a note if the tab had to be replaced
 // first; MCP content passes through untouched.
-// One shape for a step's result, whether the step finished or a caller's deadline cut it short.
-function stepEnvelope(r, { trace, explain, name } = {}) {
-  const actions = (r.actions ?? []).map(h => h.event ? `(event) ${h.event}`
-    : `${h.action}${h.key ? ` ${h.key}` : ""} ${h.element ?? ""}${h.value ? ` <- values.${h.value}` : ""}${h.option ? ` <- "${h.option}"` : ""}${h.destination ? ` -> ${h.destination}` : ""}${h.error ? `  ERROR: ${h.error}` : ""}`.trim());
-  const { status, url, title, done_score, jev_calls, ms } = r; const out = { status, url, title, actions, done_score, jev_calls, ms };
-  for (const k of ["info", "pending", "accounts", "recipe", "page_text", "candidates"]) if (r[k]) out[k] = r[k];
-  if (explain && r.rounds) out.rounds = r.rounds.map(({ candidates, ...x }) => x);
-  if (trace) out.trace = trace;
-  if (name && name !== "main") out.session = name;
-  return out;
-}
-
-const BLANK_TAB = "this tab is blank: barq drives the tabs it opens itself and cannot see the ones you already have open, so send it to the page with browser_open first";
-
 function tool(fn, timeoutMs = 60_000) {
   return async (args, extra) => {
     let session;
