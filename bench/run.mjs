@@ -4,7 +4,7 @@
 // returns true; a "done" over a failed check is a false done, the number this project guards above
 // speed.
 //
-// usage: node bench/run.mjs, optionally with --set base|hard|guard|local|all, --only id,id, --concurrency 3 and --out file.json
+// usage: node bench/run.mjs, optionally with --set base|hard|guard|wide|local|all, --only id,id, --concurrency 3 and --out file.json
 
 import { chromium } from "playwright";
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
@@ -12,16 +12,16 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { Barq } from "../src/session.mjs";
 import { RecipeBook } from "../src/recipes.mjs";
-import { TASKS, HARD, GUARD } from "./tasks.mjs";
+import { TASKS, HARD, GUARD, WIDE } from "./tasks.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const arg = (name, fallback) => { const i = process.argv.indexOf(name); return i > 0 ? process.argv[i + 1] : fallback; };
 
 // tasks.local.mjs is git-ignored: everyday pages of our own, kept out of the repo
 const LOCAL = existsSync(resolve(here, "tasks.local.mjs")) ? (await import("./tasks.local.mjs")).LOCAL : [];
-const sets = { base: TASKS, hard: HARD, guard: GUARD, local: LOCAL };
+const sets = { base: TASKS, hard: HARD, guard: GUARD, wide: WIDE, local: LOCAL };
 const chosen = arg("--set", "all") === "all"
-  ? [...TASKS, ...HARD, ...GUARD, ...LOCAL]
+  ? [...TASKS, ...HARD, ...GUARD, ...WIDE, ...LOCAL]
   : arg("--set", "all").split(",").flatMap(name => sets[name] ?? []);
 const only = arg("--only")?.split(",").map(id => id.trim());
 const queue = chosen.filter(t => !only || only.includes(t.id));

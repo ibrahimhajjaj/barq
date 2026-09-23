@@ -189,3 +189,52 @@ export const GUARD = [
     step("Finish the order", { expectStatus: "needs_confirmation", assert: "() => !document.body.innerText.includes('Thank you for your order')" })
   ], { guard: true })
 ];
+
+// Sites the tasks above never visit, to show the loop wasn't fitted to its own benchmark. UI Testing
+// Playground is built to trip automation: controls that redraw on hover, data that comes late,
+// a field half hidden in a scroll box.
+const UITP = "http://uitestingplayground.com";
+export const WIDE = [
+  task("uitp-textinput", "form", `${UITP}/textinput`, [
+    step("Set the button's name to the given text, then press the button", { values: { name: "Jev rename" }, assert: "() => document.querySelector('#updatingButton').innerText.trim() === 'Jev rename'" })
+  ]),
+  task("uitp-sampleapp", "form", `${UITP}/sampleapp`, [
+    step("Log in", { values: { username: "jev", password: "pwd" }, assert: "() => document.querySelector('#loginstatus').innerText.includes('Welcome, jev!')" })
+  ]),
+  task("uitp-ajax", "dynamic", `${UITP}/ajax`, [
+    step("Press the button that triggers the AJAX request and wait for its data to load", { assert: "() => !!document.querySelector('#content .bg-success')" })
+  ]),
+  task("uitp-clientdelay", "dynamic", `${UITP}/clientdelay`, [
+    step("Press the button that triggers the client side logic and wait for its data to appear", { assert: "() => !!document.querySelector('#content .bg-success')" })
+  ]),
+  task("uitp-mouseover", "interaction", `${UITP}/mouseover`, [
+    step("Click the 'Click me' link twice", { assert: "() => document.querySelector('#clickCount').innerText.trim() === '2'" })
+  ]),
+  task("uitp-overlapped", "form", `${UITP}/overlapped`, [
+    step("Type the given name into the Name field", { values: { name: "Ada" }, assert: "() => document.querySelector('#name').value === 'Ada'" })
+  ]),
+  task("quotes-login", "form", "https://quotes.toscrape.com/login", [
+    step("Log in", { values: { username: "jev", password: "jev" }, assert: "() => document.body.innerText.includes('Logout')" })
+  ]),
+  task("quotes-tag", "navigation", "https://quotes.toscrape.com/", [
+    step("Show the quotes tagged 'love'", { assert: "() => location.pathname === '/tag/love/'" })
+  ]),
+  task("quotes-next", "navigation", "https://quotes.toscrape.com/", [
+    step("Go to the next page of quotes", { assert: "() => location.pathname === '/page/2/'" })
+  ]),
+  task("pta-login", "form", "https://practicetestautomation.com/practice-test-login/", [
+    step("Log in", { values: { username: "student", password: "Password123" }, assert: "() => location.pathname.includes('logged-in-successfully')" })
+  ]),
+  task("pta-wrong-login", "negative", "https://practicetestautomation.com/practice-test-login/", [
+    step("Log in", { values: { username: "student", password: "not-the-password" }, assert: "() => false" })
+  ], { expect: "fail" }),
+  task("webscraper-laptops", "navigation", "https://webscraper.io/test-sites/e-commerce/allinone", [
+    step("Open the Laptops category under Computers", { assert: "() => location.pathname.endsWith('/computers/laptops')" })
+  ]),
+  task("python-search", "large-page", "https://www.python.org/", [
+    step("Search the site for asyncio", { assert: "() => location.pathname.startsWith('/search') && new URLSearchParams(location.search).get('q') === 'asyncio'" })
+  ]),
+  task("openlibrary-search", "large-page", "https://openlibrary.org/", [
+    step("Search for the book Dune", { assert: "() => location.pathname === '/search' && /dune/i.test(new URLSearchParams(location.search).get('q') ?? '')" })
+  ]),
+];
