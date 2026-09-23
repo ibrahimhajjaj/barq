@@ -179,6 +179,8 @@ function boundFields(page, answers, values) {
 }
 
 const COMMIT_MEMORY_MS = 30 * 60_000;
+// The words a goal ends on when what it wants last is to send a form it has filled.
+const SENDS = new Set(["submit", "send", "save", "register", "apply", "create", "sign", "continue", "confirm", "finish"]);
 const firedAgain = (at, action, element) => ({
   status: "needs_confirmation",
   info: `${element} was already pressed in this session at ${new Date(at).toLocaleTimeString()}; pressing it again may do it twice (a second order, a second message). Check the page first; to repeat it on purpose, use browser_act`,
@@ -1546,6 +1548,21 @@ export class Barq {
     return named.length === 1 ? named[0] : null;
   }
 
+  // A form that was filled and sent often answers with a page that only says "Received": nothing
+  // on it shows the values, so Jev can't tell and the step would end unsure. What barq did is
+  // known, though. Every value went in without an error, the last action pressed the button the
+  // goal ends by naming, the page moved to a new address, and no error is showing: the form went.
+  formWentThrough(goal, values, entered, last, page, answers, history) {
+    const keys = Object.keys(values);
+    if (!keys.length || !keys.every(k => entered.includes(k)) || history.some(h => h.error)) return false;
+    if (last?.tool !== "click" || !/^button|^input:(submit|button)|\[button\]/.test(last.el?.tag ?? "")) return false;
+    const clause = goal.split(/,|;|\bthen\b|\band\b/i).map(c => c.trim()).filter(Boolean).at(-1)?.toLowerCase() ?? "";
+    const verbs = clause.match(/[a-z]+/g)?.filter(w => SENDS.has(w)) ?? [];
+    const says = String(last.el.text ?? last.el.label ?? "").trim().toLowerCase();
+    if (!verbs.some(v => says === v || says.startsWith(`${v} `))) return false;
+    return page.url !== last.url && (answers.error?.noul ?? 1) < 0.3;
+  }
+
   // Jev writes nothing, but it can pick, so a goal that names what to look for can still fill a
   // field the caller gave no value for: the goal's own phrases become the options. Returns the
   // text to type, or null when none of them is the thing.
@@ -1609,7 +1626,7 @@ export class Barq {
     let echoedGoal = false;
     const seen = new Map();
     // the element the last action went to, and a list field typed into without choosing from it
-    let acted = null, typed = null, pressedEnding = false, staleRounds = 0, waitedOnWall = false;
+    let acted = null, typed = null, pressedEnding = false, staleRounds = 0, waitedOnWall = false, lastAct = null;
     ({ prompt: this.promptText } = values);
     this.loginIntent(values);
     // The call right after this goal stopped for confirmation goes on with the same flow: a recipe
@@ -1782,6 +1799,10 @@ export class Barq {
             try { r.act_ms = await this.act({ tool: "click", target: ending.i }); } catch (e) { h.error = actionError(e); }
             history.push(h);
             continue;
+          }
+          if (r.confirm < 0.65 && this.formWentThrough(goal, values, entered, lastAct, page, a, history.slice(before))) {
+            status = "done"; info = "every value went in and the form was sent: the button the goal ends on was pressed and the page moved on";
+            break;
           }
           if (r.confirm < 0.65) { status = "likely_done"; info = "the page looks done but Jev is unsure; verify with a check, snapshot or screenshot"; break; }
         }
@@ -1985,6 +2006,7 @@ export class Barq {
       if (committing) r.committed = true;
 
       lastTool = act.tool;
+      lastAct = { tool: act.tool, el: act.el, url: page.url };
       const h = { action: act.tool, element: brief(act.el ?? null) };
       if (act.tool === "select" && act.value != null) h.option = act.optionGroup ? `${act.value} (${act.optionGroup})` : act.value;
       if (act.valueKey && VALUED.includes(act.tool)) h.value = act.valueKey;

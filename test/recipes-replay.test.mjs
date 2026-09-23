@@ -724,3 +724,32 @@ test("a different page's button of the same name is its own action", async t => 
   await b.open(thread(2));
   assert.equal((await b.do("Send it", { recipe: false, allowIrreversible: true })).status, "done");
 });
+
+// A form whose answer page says only that it arrived; with `stays`, the page's script stops the send.
+async function sentForm(t, { stays = false } = {}) {
+  const { b } = await session(t, "");
+  await b.page.route("https://form.test/**", route => route.fulfill({ contentType: "text/html", body: new URL(route.request().url()).pathname === "/received"
+    ? "<title>Done</title><h1>Received!</h1>"
+    : `<form action="/received"${stays ? ' onsubmit="return false"' : ""}><label>Name <input name="name"></label><label>City <input name="city"></label><button>Submit</button></form>` }));
+  await b.open("https://form.test/form");
+  jev(b, (page, history) => {
+    const typed = history.filter(h => h.action === "type").length;
+    if (typed === 0) return answer({ tool: "type", target: el(page, e => e.label === "Name"), value: "name" });
+    if (typed === 1) return answer({ tool: "type", target: el(page, e => e.label === "City"), value: "city" });
+    if (!did(history, "Submit")) return answer({ target: el(page, e => e.text === "Submit") });
+    return finished(0.55);   // leaning done, as Jev does on a page that shows none of the values
+  });
+  b.call = async () => ({ answers: { complete: { noul: 0.3 }, q: { noul: 0.3 } } });   // and the stricter check unsure
+  return b.do("Fill in the name and city, then submit the form", { values: { name: "Ada", city: "Lisbon" }, recipe: false });
+}
+
+test("a form filled from the values and sent to a new page ends done, though the page shows none of them", async t => {
+  const r = await sentForm(t);
+  assert.equal(r.status, "done", r.info);
+  assert.match(r.info, /the form was sent/);
+});
+
+test("a Submit that leaves the page where it was is still left for the caller to check", async t => {
+  const r = await sentForm(t, { stays: true });
+  assert.equal(r.status, "likely_done", r.info);
+});
