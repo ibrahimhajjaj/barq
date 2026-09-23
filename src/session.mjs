@@ -1527,10 +1527,12 @@ export class Barq {
           break;
         }
       } else if (done >= (round > 0 ? doneAt : 0.9) && (done >= 0.85 || act.tool === "none" || round === 0)) {
-        if (done < 0.75) {
+        if (done < 0.85) {
           // a soft "done" with nothing left to do can still be wrong (an earlier action went to the
-          // wrong element): the stricter question decides between done and "verify it yourself".
-          // From 0.75 up, every such stop checked so far was right.
+          // wrong element, or a button whose name promised the search only closed a calendar): the
+          // stricter question decides between done and "verify it yourself". The line is the same
+          // 0.85 the round with a chosen action uses; at 0.75 a flight search that never ran was
+          // taken as done.
           r.confirm = await this.looksFinished(page, goal, history);
           log(`     confirm=${r.confirm}`);
           if (r.confirm < 0.65) { status = "likely_done"; info = "the page looks done but Jev is unsure; verify with a check, snapshot or screenshot"; break; }
