@@ -15,7 +15,7 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
-import { SessionPool } from "../src/pool.mjs";
+import { SessionPool, CallTimeout, CallCancelled } from "../src/pool.mjs";
 import { browserConfig, openBrowser } from "../src/browsers.mjs";
 import { RecipeBook } from "../src/recipes.mjs";
 import { TraceLog, traceDir } from "../src/trace.mjs";
@@ -82,7 +82,9 @@ function tool(fn, timeoutMs = 60_000) {
     } catch (e) {
       // a step cut short by this caller's own deadline still says what it did, and writes the same
       // trace a finished one would: "gave up after 120s" on its own is not something anyone can act on
-      const partial = session?.partialStep?.();
+      // Only the deadline itself: any other failure mid-step (the model refusing a request, say)
+      // is reported as that failure, not as time running out.
+      const partial = (e instanceof CallTimeout || e instanceof CallCancelled) && session?.partialStep?.();
       if (partial) {
         const trace = traces.write("do", { ...partial, timed_out: true }, { session: args.session ?? "main" });
         return text(stepEnvelope({ ...partial, title: undefined }, { trace, explain: true, name: args.session }));
