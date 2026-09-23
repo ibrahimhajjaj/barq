@@ -61,6 +61,7 @@ waiting for pages; Jev's own share is 300 to 400 ms a call.
 | the page answers for a plain goal, question during settle | **41/41** | 0 | 4.17 s | 184.1 s | 186 | 334 |
 | dropdown options and one-prompt tasks (43 tasks) | **43/43** | 0 | 4.65 s | 225.0 s | 199 | 368 |
 | a finished step is not stuck (51 tasks, see below) | **51/51** | 0 | 4.22 s | 237.3 s | 219 | 365 |
+| list fields, calendars, a stricter finish (53 tasks) | **53/53** | 0 | 4.23 s | 285.9 s | 258 | 349 |
 
 The last row is a wider set: `npm run bench` also picks up `bench/tasks.local.mjs`, seven live-site
 tasks kept out of the published set (a Wikipedia article in Arabic, two GitHub navigations, an MDN
@@ -72,6 +73,20 @@ already acted, now answers `likely_done` rather than `stuck`, and the stricter q
 before either stopped asking whether the page has nothing left to offer and started asking whether
 what the goal asked for has happened. The first was found by another session driving a shop: "add
 both X and Y to the cart" came back `stuck` three times out of three with both items in the cart.
+
+The 53-task row adds two Google Flights tasks to the local set, one goal in a single sentence
+and the same trip as five steps. Both failed before it: a city typed into a field that only takes a
+value picked from its suggestions was thrown away when the focus moved on, the calendar listed every
+month's 20th as "20", its date only reached the form through the calendar's own Done button, and a
+Search pressed while a typed date was still unconfirmed was swallowed. Worse, the one-sentence goal
+came back `done` three times out of four without searching, on a "done" score of 0.74 to 0.78.
+Now a suggestion that starts with the typed text is picked inside the typing, calendar days carry
+their date, a picker's Done is pressed before the step ends on it, and a soft "done" with nothing
+left to do meets the stricter question up to 0.85 rather than 0.75. That last change costs
+decisiveness elsewhere: `react-select`, `ti-dynamic-controls`, `ti-entry-ad` and `todomvc-fine`
+now end `likely_done` rather than `done`, still correct. Their scores (0.76 to 0.82) overlap the
+Flights false finish, so no line between the two exists, and a false `done` is the one number here
+we don't trade.
 
 A task or two moves between runs of the same code: live sites and the model's scores near a
 threshold both vary. Read one run's 38 against another's 39 as noise, not progress. In the last run
@@ -85,8 +100,15 @@ the first decision to done, initial navigation outside the timer) and their loca
 
 - Their Wikipedia task: **3.42 s** here against **2.798 s** there, three runs, all correct.
 - Their hotel fixture: **4.21 s** here against **1.896 s** there, three runs, all correct.
+- Their Google Flights task, with their goal and their independent checker (route, one-way, date,
+  and every listed flight on that date), date moved from 20 September to 20 October 2026 since
+  theirs had passed: **24 runs here, 23 passed**, median about **10.2 s**, 14 to 18 Jev calls, and
+  no text model. Theirs: **6 of 6** in their published runs (three per arm), median **7.092 s**, 17
+  Jev calls plus two calls to a text model that writes the city names. The one miss here ended
+  `ambiguous` before the date was set, not `done`. Their Jev answers come back in 178 ms, ours in
+  about 350 ms from where we measure, which over 14 to 16 calls is most of the difference.
 
-Both are run from one prompt with nothing supplied: the text to type is chosen out of the goal
+All three are run from one prompt with nothing supplied: the text to type is chosen out of the goal
 itself, since the decision model cannot write but can pick.
 
 Two tasks were added to the benchmark out of this comparison, because both are shapes that produced
