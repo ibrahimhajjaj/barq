@@ -9,7 +9,7 @@
 import { chromium } from "playwright";
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { Barq } from "../src/session.mjs";
 import { RecipeBook } from "../src/recipes.mjs";
 import { TASKS, HARD, GUARD } from "./tasks.mjs";
@@ -118,8 +118,11 @@ const summary = {
   guard_would_pause: wouldPause,   // unguarded tasks where the guard would have stopped
 };
 
+// A fixture's address holds wherever this copy of the repo sits, which says nothing about the run
+// and doesn't belong in a file that gets shared: it is written relative to the repo.
+const repo = pathToFileURL(resolve(here, "..")).href;
 mkdirSync(dirname(outFile), { recursive: true });
-writeFileSync(outFile, JSON.stringify({ summary, results }, null, 1));
+writeFileSync(outFile, JSON.stringify({ summary, results }, null, 1).replaceAll(`${repo}/`, "file://./"));
 
 console.log(`\n${summary.correct}/${summary.tasks} correct · ${summary.false_done} false-done · ${calls} calls (avg ${summary.avg_jev_ms}ms) · ${summary.tokens} tokens`);
 if (summary.likely_done.length) console.log(`likely_done (caller should verify):\n  ${summary.likely_done.join("\n  ")}`);
