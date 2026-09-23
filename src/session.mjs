@@ -784,6 +784,19 @@ export class Barq {
 
     const text = await resolveValue(act.value);
     await loc.fill("", opts);
+    // Keys go wherever the focus is, not to the field they were meant for. A page can move it the
+    // moment the field is focused: a search box that opens its real search in an overlay, or a
+    // popup that grabs the focus for its own button, where a space in the text would press it.
+    // A field that takes over is typed into, since that is where the page wants the text; focus
+    // anywhere else gets no keys at all, and the value is set on the field directly.
+    const focus = await loc.evaluate(el => {
+      let a = document.activeElement;
+      while (a?.shadowRoot?.activeElement) a = a.shadowRoot.activeElement;
+      if (!a || a === el || el.contains(a)) return "here";
+      return a.isContentEditable || /^(INPUT|TEXTAREA)$/.test(a.tagName) ? "field" : "elsewhere";
+    }).catch(() => "here");
+    if (focus === "field") return void await this.page.keyboard.type(text, { delay: 5 });
+    if (focus === "elsewhere") return void await loc.fill(text, opts);
     // Some editors take a quarter of a second over each key, and a title typed key by key runs out
     // of time halfway, leaving the field cut short. Whatever the keys didn't finish is filled in
     // one go instead, which is the whole value.

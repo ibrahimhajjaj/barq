@@ -113,3 +113,16 @@ test("Enter straight after typing goes to the field typed into, not a checkbox J
   // without typing just before, a checkbox is no place for Enter: the likeliest field takes it
   assert.equal(b.resolve(page, answers({ 3: 0.6, 1: 0.3 }), {}, {}).target, 1);
 });
+
+test("keys never go to a button that took the focus from the field; a field that takes over gets them", async () => {
+  await b.page.setContent(`<input id="field"><button id="bin" onclick="document.body.dataset.pressed = 1">Delete</button>
+    <script>document.getElementById("field").addEventListener("focus", () => document.getElementById("bin").focus());</script>`);
+  await b.typeInto(b.page.locator("#field"), { value: "a b c" }, { timeout: 4000 });
+  assert.equal(await b.page.getAttribute("body", "data-pressed"), null, "the space in the text pressed nothing");
+  assert.equal(await b.page.inputValue("#field"), "a b c");
+
+  await b.page.setContent(`<input id="field" placeholder="Search docs"><div id="overlay" hidden><input id="real"></div>
+    <script>document.getElementById("field").addEventListener("focus", () => { overlay.hidden = false; real.focus(); });</script>`);
+  await b.typeInto(b.page.locator("#field"), { value: "hooks" }, { timeout: 4000 });
+  assert.equal(await b.page.inputValue("#real"), "hooks", "the search the page opened got the text");
+});
