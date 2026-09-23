@@ -60,6 +60,24 @@ export function apiKey() {
 const deadline = (signal, timeout) => (signal ? AbortSignal.any([signal, AbortSignal.timeout(timeout)]) : AbortSignal.timeout(timeout));
 const worthRetrying = status => status === 429 || status >= 500;
 
+// An answer is acted on only in the shape that was asked for: every question answered, every
+// probability a number from 0 to 1, and every choice one of the options offered. Anything else is a
+// fault on the way back, and a step must not guess at what a malformed answer meant.
+const probability = x => typeof x === "number" && Number.isFinite(x) && x >= 0 && x <= 1 + 1e-6;
+export function malformed(answers, questions) {
+  for (const [name, q] of Object.entries(questions)) {
+    const a = answers?.[name];
+    if (a == null) return `no answer to ${name}`;
+    if (q.type === "noul" && !probability(a.noul)) return `${name} is not a probability`;
+    if (q.type !== "choice") continue;
+    const offered = new Set(Object.keys(q.criteria ?? {}));
+    if (!offered.size) continue;
+    if (a.choice != null && !offered.has(String(a.choice))) return `${name} chose ${a.choice}, which was not offered`;
+    if (a.probabilities && !Object.entries(a.probabilities).every(([k, v]) => offered.has(k) && probability(v))) return `${name} has probabilities for options that were not offered`;
+  }
+  return null;
+}
+
 // Page text is cut to size in many places, and a cut can land inside an emoji, leaving half of it.
 // The API refuses the whole request over that, so every string goes out whole, with any stray half
 // replaced by the replacement character.
@@ -92,8 +110,10 @@ export async function jev(state, questions, { retries = 2, timeout = 60_000, sig
     }
 
     const ms = Math.round(performance.now() - startedAt);
-    if (res.ok && body?.answers) return { answers: body.answers, ms, tokens: body.usage?.input_tokens ?? 0, model: body.model ?? MODEL };
-    if (res.ok) throw new Error("Jev returned a response without answers");
+    const fault = res.ok && body?.answers ? malformed(body.answers, questions) : null;
+    if (res.ok && body?.answers && !fault) return { answers: body.answers, ms, tokens: body.usage?.input_tokens ?? 0, model: body.model ?? MODEL };
+    if (res.ok && attempt < retries) { await pause(backoffMs(attempt)); continue; }
+    if (res.ok) throw new Error(fault ? `Jev answered out of shape: ${fault}` : "Jev returned a response without answers");
     if (attempt < retries && worthRetrying(res.status)) {
       await pause(backoffMs(attempt));
       continue;
