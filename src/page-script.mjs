@@ -262,8 +262,13 @@ export const ENUMERATE = ({ start, frame }) => {   // start: the first number to
   const elements = [];
   const taken = new Set();
   let next = start;
+  // The heading a control sits under. Everything is walked in document order, so the last heading
+  // passed is the one it belongs to: the rules under "r/mcp Rules" are named after themselves, and
+  // only this says which rules they are.
+  let heading = "";
   for (const el of everything) {
     const tag = el.localName;
+    if ((/^h[1-6]$/.test(tag) || el.getAttribute("role") === "heading") && isVisible(el)) heading = tidy(el.innerText, 60) || heading;
     if (!offered(el, tag)) continue;
 
     const type = tag !== "input" ? null : (el.getAttribute("type") || "text").toLowerCase();
@@ -287,6 +292,7 @@ export const ENUMERATE = ({ start, frame }) => {   // start: the first number to
     if (own.length < 16 || isField) describeSurroundings(hit, o, own);
     if (!hidden && isCovered(hit, el)) o.covered = true;
 
+    if (heading) o.section = heading;
     hit.setAttribute("data-jev-i", String(next));
     elements.push(o);
     next++;

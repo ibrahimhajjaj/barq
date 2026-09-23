@@ -131,6 +131,10 @@ export function likelyFor(elements, goal, keep) {
     const name = NAME_OF(e);
     let n = 0;
     for (const w of words) if (name.includes(w)) n += name.split(/\W+/).includes(w) ? 4 : 2.5;
+    // the heading it sits under counts for less than its own words, but it counts: "the first rule
+    // in the Rules section" is about controls that never say "rule" themselves
+    const section = String(e.section ?? "").toLowerCase();
+    for (const w of words) if (section.includes(w)) n += section.split(/\W+/).includes(w) ? 2 : 1;
     if (FIELDISH(e) || SELECTISH(e)) n += 2;                       // something to fill in is rarely noise
     if (/^(button|a|input:submit|input:button)/.test(e.tag)) n += 1.5;
     if (e.active) n += 1;

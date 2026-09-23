@@ -512,6 +512,11 @@ export class Barq {
   }
 
   async call(state, questions) {   // one request to Jev, counted and timed
+    // An element's section heading is barq's own, for choosing which elements to ask about. Jev's
+    // answers were tuned without it, and a new field in what it reads changes them.
+    if (state?.page?.elements?.some(e => e.section != null)) {
+      state = { ...state, page: { ...state.page, elements: state.page.elements.map(({ section, ...e }) => e) } };
+    }
     const signals = [this.abort?.signal, this.callSignal].filter(Boolean);
     const signal = signals.length > 1 ? AbortSignal.any(signals) : signals[0];
     let r;

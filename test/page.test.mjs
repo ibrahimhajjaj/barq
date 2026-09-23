@@ -1039,3 +1039,23 @@ test("option summaries list every option while they fit and show the range when 
   assert.equal(optionSummary([{ label: 'Paris', group: 'Europe' }, { label: 'Lyon', group: 'Europe' }, { label: 'Paris', group: 'America' }], 700), 'Europe: Paris | Lyon | America: Paris');
   assert.equal(clipMiddle('Department of Computer Science, Room 101', 20), 'Department o…oom 101');
 });
+
+test("a big page keeps the controls whose section the goal names, and Jev never sees the heading", async () => {
+  const b2 = await Barq.launch({ browser });
+  const filler = Array.from({ length: 300 }, (_, k) => `<a href="#p${k}">Post ${k}</a>`).join(" ");
+  await b2.page.setContent(`<main>${filler}</main>
+    <aside><a href="#site">Reddit Rules</a><h2>r/mcp Rules</h2>
+      ${["Be respectful", "No spam", "Stay on topic"].map((r, k) => `<details><summary>${k + 1}. ${r}</summary><p>…</p></details>`).join("")}
+    </aside>`);
+  const page = await b2.snapshot();
+  const rule = page.elements.find(e => /Be respectful/.test(e.text ?? ""));
+  assert.equal(rule.section, "r/mcp Rules");
+  const kept = likelyFor(page.elements, "Expand the first rule in the r/mcp Rules section of the sidebar", 240);
+  assert.ok(kept.includes(rule), "the rule under the heading the goal names is kept");
+  let sent;
+  b2.request = async state => { sent = state; return { answers: { q: { noul: 0.5 } }, ms: 1, tokens: 1 }; };
+  await b2.call({ page, task: { goal: "x" } }, { q: { type: "noul", instructions: "?" } }).catch(() => {});
+  assert.ok(sent?.page?.elements?.length, "the page went out");
+  assert.ok(sent.page.elements.every(e => !("section" in e)), "no section heading in what Jev reads");
+  await b2.close();
+});
