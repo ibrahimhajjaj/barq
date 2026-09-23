@@ -167,8 +167,8 @@ also talk a check round, since that name is evidence too; `browser_read` answers
 instead, and tells you which headings a passage sat under. Counting works, because code counts rather than Jev. Captchas are
 reported, never solved. Sites that serve nothing to automated browsers need your own browser.
 
-On the 41-task benchmark: 41/41 correct in the best run, 0 false "done" in every run, about 4.5 s
-a task, 300 to 400 ms a Jev call. [RESULTS.md](RESULTS.md) has the runs and the failures,
+On the 43-task public benchmark: 43/43 correct in the latest run, 0 false "done" in every run, about
+4.2 s a task, 300 to 400 ms a Jev call. [RESULTS.md](RESULTS.md) has the runs and the failures,
 [NOTES.md](NOTES.md) how it works and why.
 
 ## Development
