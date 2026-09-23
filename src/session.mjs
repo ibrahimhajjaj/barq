@@ -237,7 +237,7 @@ export class Barq {
 
   constructor(page, { context = page.context(), browser = null, ownContext = false, ownBrowser = false, recipes = null } = {}) {
     Object.assign(this, { browser, context, ownContext, ownBrowser, recipes });
-    this.frames = new Map(); this.inflight = new Map(); this.lastPage = null; this.events = [];
+    this.frames = new Map(); this.inflight = new Map(); this.lastPage = null; this.events = []; this.pageErrors = [];
     this.shown = null;   // the listing the caller's element numbers refer to
     this.dialogPolicy = SAFE_DIALOGS;   // until a step says otherwise
     this.request = jev;              // the decision model's API, replaceable in tests
@@ -281,6 +281,23 @@ export class Barq {
       const accept = await (async () => this.dialogPolicy(d))().catch(() => false);
       this.events.push(`${d.type()} dialog "${d.message().slice(0, 100)}" ${(accept && "accepted") || "dismissed"}`);
       await (accept ? d.accept(this.promptText ?? undefined) : d.dismiss()).catch(() => { /* already answered or gone */ });
+    });
+    // What the site's own code reported going wrong: an uncaught error, a console error, a request
+    // the server refused. A step that "did nothing" often did, and this says why. Other sites' ads
+    // and trackers fail all the time, so only the page's own site is counted.
+    const own = url => { try { return siteOf(new URL(url).hostname) === siteOf(new URL(p.url()).hostname); } catch { return false; } };
+    const report = (kind, text) => {
+      text = String(text).replace(/\s+/g, " ").slice(0, 200);
+      if (this.pageErrors.length < 10 && !this.pageErrors.some(e => e.text === text)) this.pageErrors.push({ kind, text });
+    };
+    p.on("pageerror", e => report("error", e.message));
+    p.on("console", m => { if (m.type() === "error" && (!m.location()?.url || own(m.location().url))) report("console", m.text()); });
+    p.on("response", r => {
+      if (r.status() >= 400 && ["fetch", "xhr", "document"].includes(r.request().resourceType()) && own(r.url())) report("http", `${r.status()} ${r.request().method()} ${r.url().slice(0, 120)}`);
+    });
+    p.on("requestfailed", r => {
+      const why = r.failure()?.errorText ?? "";
+      if (!/ABORTED/i.test(why) && ["fetch", "xhr", "document"].includes(r.resourceType()) && own(r.url())) report("network", `${why} ${r.url().slice(0, 120)}`);
     });
     p.on("crash", () => { if (this.page === p) this.crashed = true; });
     p.on("close", () => {
@@ -1435,6 +1452,7 @@ export class Barq {
   // recipe: false neither replays nor records for this call.
   async runGoal(goal, { values = {}, maxActions = 10, doneAt = 0.5, minTarget = 0.3, allowIrreversible = false, irreversibleAt = 0.6, log = () => {}, recipe = true } = {}) {
     const t0 = Date.now(), calls0 = this.stats.calls;
+    this.pageErrors.length = 0;
     const history = [], rounds = [];
     let prevPage = null, waits = 0, page = null, status = "max_actions", info, pending, accounts, retried = false;
     let lastTool = null;
@@ -1837,6 +1855,7 @@ export class Barq {
       ...(info ? { info } : {}),
       ...(pending ? { pending } : {}),
       ...(accounts ? { accounts } : {}),
+      ...(this.pageErrors.length ? { page_errors: this.pageErrors.splice(0) } : {}),
     };
     // what the flow did so far, this call's part and the part before a confirmation stop
     const rec = book ?? (flow ? this.recipes : null), whole = [...(flow?.steps ?? []), ...steps], replayed = (flow?.replayed ?? 0) + (run?.count ?? 0);

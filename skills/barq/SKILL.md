@@ -64,6 +64,10 @@ Every record carries the page's HTTP `status`, so a 404 or 500 can be told from 
 - `blocked`: captcha or access denied. Tell the user.
 - `timeout`: the step ran out of time (`timeout_s`, default 90). `actions` shows what was done.
 
+A result with `page_errors` lists what the site's own code reported during the step: uncaught
+errors, console errors, requests the server refused. Read it when a step stalls or a click
+"did nothing".
+
 ## Secrets
 
 Never put a password, one-time code or card number in `values` as plain text, and never ask the

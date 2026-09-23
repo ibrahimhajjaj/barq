@@ -587,3 +587,11 @@ test("a real wall is still blocked", async t => {
   assert.equal(r.status, "blocked");
   assert.ok(Date.now() - started < 5000, "no wait for a page that isn't a browser check");
 });
+
+test("what the site's own code reported going wrong comes back with the step", async t => {
+  const { b } = await session(t, `<button onclick="console.error('cart service unavailable'); throw new Error('addItem failed')">Add to basket</button>`);
+  jev(b, (page, history) => did(history, "Add to basket") ? finished(0.95) : answer({ target: el(page, e => e.text === "Add to basket") }));
+  const r = await b.do("Add the item to the basket", { recipe: false });
+  assert.deepEqual(r.page_errors?.map(e => e.kind).sort(), ["console", "error"], JSON.stringify(r.page_errors));
+  assert.ok(r.page_errors.some(e => e.text.includes("addItem failed")));
+});
