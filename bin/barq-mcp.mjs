@@ -92,8 +92,12 @@ server.registerTool("browser_open", {   // go to an address
   title: "Open URL",
   annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
   description: "Navigate the session's tab to a URL and wait until the page settles. Starts the browser and the tab on first use.",
-  inputSchema: { url: z.string().describe("Absolute URL"), session },
-}, tool(async (b, { url }) => {
+  inputSchema: {
+    url: z.string().describe("Absolute URL"), session,
+    allowed_sites: z.array(z.string()).optional().describe("Keep this session to these sites (hosts; subdomains included) from now on. A page that tries to leave them is stopped and the step ends blocked"),
+  },
+}, tool(async (b, { url, allowed_sites }) => {
+  if (allowed_sites?.length) await b.keepTo(allowed_sites);
   const r = await b.open(url);
   const page = await b.snapshot();   // as it stands now
   // a count is not a listing: no element numbers went back to the caller, so acting on one now

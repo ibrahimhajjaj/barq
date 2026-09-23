@@ -605,3 +605,24 @@ test("a step counts the Jev tokens it spent and what they cost", async t => {
   assert.equal(r.jev_tokens, 10000);
   assert.equal(r.jev_cost_usd, 0.00042);
 });
+
+test("a session kept to one site doesn't follow a link off it, and says so", async t => {
+  const http = await import("node:http");
+  const server = http.createServer((req, res) => {
+    res.setHeader("content-type", "text/html");
+    res.end(req.headers.host.startsWith("localhost") ? "<title>elsewhere</title><p>off the list</p>"
+      : `<title>shop</title><a href="http://localhost:${server.address().port}/win">Claim your prize</a>`);
+  });
+  await new Promise(done => server.listen(0, "127.0.0.1", done));
+  t.after(() => { server.closeAllConnections(); server.close(); });
+  const home = `http://127.0.0.1:${server.address().port}/`;
+  const { b } = await session(t, "");
+  await b.keepTo(["127.0.0.1"]);
+  await b.open(home);
+  jev(b, (page, history) => did(history, "Claim") ? finished(0.95) : answer({ target: el(page, e => e.text === "Claim your prize") }));
+  const r = await b.do("Claim the prize", { recipe: false });
+  assert.equal(r.status, "blocked", r.info);
+  assert.match(r.info, /outside the sites this session may visit/);
+  assert.equal(b.page.url(), home, "the tab stayed on the allowed site");
+  await assert.rejects(b.open(`http://localhost:${server.address().port}/`), /outside the sites this session may visit/);
+});

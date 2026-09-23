@@ -237,7 +237,7 @@ export class Barq {
 
   constructor(page, { context = page.context(), browser = null, ownContext = false, ownBrowser = false, recipes = null } = {}) {
     Object.assign(this, { browser, context, ownContext, ownBrowser, recipes });
-    this.frames = new Map(); this.inflight = new Map(); this.lastPage = null; this.events = []; this.pageErrors = [];
+    this.frames = new Map(); this.inflight = new Map(); this.lastPage = null; this.events = []; this.pageErrors = []; this.fenced = new WeakSet();
     this.shown = null;   // the listing the caller's element numbers refer to
     this.dialogPolicy = SAFE_DIALOGS;   // until a step says otherwise
     this.request = jev;              // the decision model's API, replaceable in tests
@@ -260,6 +260,7 @@ export class Barq {
 
   async adopt(p) {
     this.pages.push(p);
+    await this.fence(p);
     // scripts count too: an app that loads its code on demand isn't there until the chunk runs
     // A request counts while it's young: a long-poll isn't loading. A script from another site
     // (ads, analytics, widgets, or the site's own CDN) counts for a second at most: long enough
@@ -275,7 +276,14 @@ export class Barq {
     };
     const untrack = r => { if (this.inflight.delete(r)) this.wakeSettle(); };
     p.on("request", track); p.on("requestfinished", untrack); p.on("requestfailed", untrack);
-    p.on("popup", np => { this.popupArrivedAt = Date.now(); this.events.push(`new tab opened: ${np.url()}`); this.page = np; this.wakeSettle(); this.adopt(np).catch(() => {}); });
+    p.on("popup", np => {
+      if (!this.siteAllowed(np.url())) {
+        this.offLimits = new URL(np.url()).host;
+        this.events.push(`closed a new tab going to ${this.offLimits}: outside the allowed sites`);
+        np.close().catch(() => {});
+        return;
+      }
+      this.popupArrivedAt = Date.now(); this.events.push(`new tab opened: ${np.url()}`); this.page = np; this.wakeSettle(); this.adopt(np).catch(() => {}); });
     p.on("dialog", async d => {
       // a confirm or a prompt is often the site asking "are you sure?" before it deletes or charges
       const accept = await (async () => this.dialogPolicy(d))().catch(() => false);
@@ -385,7 +393,37 @@ export class Barq {
     return Date.now() - t0;
   }
 
+  // The sites this session may visit, as hosts ("shop.example" takes in its subdomains). Once set,
+  // a page that tries to take the tab anywhere else is stopped before the page loads, and the step
+  // ends blocked: a link planted in a page's text can't walk the session off to another site.
+  async keepTo(sites) {
+    this.allowedSites = sites.map(x => String(x).trim().toLowerCase().replace(/^[a-z]+:\/\//, "").replace(/[/:].*$/, "")).filter(Boolean);
+    for (const p of this.pages) if (!p.isClosed()) await this.fence(p);
+  }
+
+  siteAllowed(url) {
+    if (!this.allowedSites) return true;
+    let u; try { u = new URL(url); } catch { return false; }
+    if (!/^https?:$/.test(u.protocol)) return ["about:", "data:", "blob:"].includes(u.protocol);
+    const host = u.hostname.toLowerCase();
+    return this.allowedSites.some(site => host === site || host.endsWith("." + site));
+  }
+
+  async fence(p) {
+    if (!this.allowedSites || this.fenced.has(p)) return;
+    this.fenced.add(p);
+    await p.route(url => !this.siteAllowed(url.href), route => {
+      const req = route.request();
+      if (!req.isNavigationRequest() || req.frame() !== p.mainFrame()) return route.continue();
+      this.offLimits = new URL(req.url()).host;
+      this.events.push(`stopped the tab going to ${this.offLimits}: outside the allowed sites`);
+      // an empty answer leaves the tab where it was; an aborted request would show an error page
+      return route.fulfill({ status: 204 });
+    });
+  }
+
   async open(url) {
+    if (!this.siteAllowed(url)) throw new Error(`${url} is outside the sites this session may visit (${this.allowedSites.join(", ")})`);
     const t0 = Date.now();
     if (!warmed) {
       warmed = true;
@@ -1529,6 +1567,12 @@ export class Barq {
       await this.settle();
       page = await this.snapshot();
       for (const event of this.events.splice(0)) history.push({ event });
+      if (this.offLimits) {
+        status = "blocked";
+        info = `the page tried to take the tab to ${this.offLimits}, which is outside the sites this session may visit; it was stopped`;
+        this.offLimits = null;
+        break;
+      }
       const login = await this.pickNamedLogin(page, values, log);
       if (login) {
         history.push(login.h);

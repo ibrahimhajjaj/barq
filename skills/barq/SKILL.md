@@ -63,8 +63,12 @@ keep to its Crawl-delay.
   and `browser_act` acts on one directly. Take the snapshot first: the numbers belong to the page
   it listed, and `browser_act` refuses a number this session never saw listed rather than act on
   whatever now sits at it. Then go back to `browser_do`.
-- `blocked`: captcha or access denied. Tell the user.
+- `blocked`: captcha or access denied, or (with `allowed_sites`) the page tried to leave the sites
+  the session was kept to. Tell the user.
 - `timeout`: the step ran out of time (`timeout_s`, default 90). `actions` shows what was done.
+
+For work on pages you don't trust, pass `allowed_sites` to `browser_open`: the session then stays on
+those sites, and a link that would take it elsewhere is stopped.
 
 A result with `page_errors` lists what the site's own code reported during the step: uncaught
 errors, console errors, requests the server refused. Read it when a step stalls or a click
