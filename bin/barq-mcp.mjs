@@ -263,8 +263,9 @@ server.registerTool("browser_scan", {
     wait_for: z.string().optional().describe("A CSS selector to wait for before reading"),
     tabs: z.number().int().min(1).max(6).optional().describe("Default 3"),
     out: z.string().optional().describe("The JSONL file; by default a new one next to barq's traces"),
+    robots: z.boolean().optional().describe("Skip pages the site's robots.txt disallows, and keep to its Crawl-delay"),
   },
-}, async ({ urls, js, selector, click_until_gone, wait_for, tabs, out }) => {
+}, async ({ urls, js, selector, click_until_gone, wait_for, tabs, out, robots }) => {
   try {
     const id = `scan-${++scanCount}`;
     const file = out ?? join(traceDir() ?? tmpdir(), "scans", `${new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-")}-${id}.jsonl`);
@@ -272,7 +273,7 @@ server.registerTool("browser_scan", {
     const ac = new AbortController(), release = pool.hold();
     const s = { id, status: "running", file, sample: [], errors: [], summary: null, ac };
     s.run = scan(host, urls, {
-      tabs: tabs ?? 3, checkpoint: file, js, selector, clickUntilGone: click_until_gone, waitFor: wait_for, signal: ac.signal,
+      tabs: tabs ?? 3, checkpoint: file, js, selector, clickUntilGone: click_until_gone, waitFor: wait_for, robots: !!robots, signal: ac.signal,
       onRecord: (r, sum) => {
         s.summary = sum;
         if (r.error) s.errors = [...s.errors, { key: r.key, error: r.error }].slice(-3);

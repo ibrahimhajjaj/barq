@@ -46,6 +46,8 @@ the page) or `selector`, and `click_until_gone` for a "load more" button. If it 
 blocked by a site answering 429 or 503 (too many requests), barq has already waited and tried
 again; the pages not read stay to do, so run the same scan later with more jitter or fewer tabs.
 Every record carries the page's HTTP `status`, so a 404 or 500 can be told from real content.
+Pass `robots: true` to skip pages the site's robots.txt disallows (recorded with `skipped`) and to
+keep to its Crawl-delay.
 
 ## Statuses from browser_do
 

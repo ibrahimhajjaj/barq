@@ -38,6 +38,7 @@ before(async () => {
         res.setHeader("content-type", "text/html");
         return res.end("<li>let through</li>");
       }
+      if (path === "/robots.txt") { res.setHeader("content-type", "text/plain"); return res.end("User-agent: *\nDisallow: /p/\nAllow: /p/public\n"); }
       if (path === "/limited") { res.writeHead(429); return res.end("slow down"); }
       if (path === "/flaky") {
         if (++flakyHits === 1) { await sleep(3000); }
@@ -123,4 +124,18 @@ test("a site still refusing after the retries stops the scan and leaves its page
   assert.equal(sum.left, 2, "neither page is marked done, so a rerun reads both");
   let saved = ""; try { saved = readFileSync(file, "utf8"); } catch {}
   assert.equal(saved.trim(), "", "nothing from the refusal was written as a result");
+});
+
+test("with robots on, pages robots.txt keeps crawlers out of are skipped, not visited", async () => {
+  const file = join(dir, "robots.jsonl");
+  const seen = [];
+  const sum = await scan(host, [`${base}/p/3`, `${base}/p/public`, `${base}/more`], { tabs: 1, jitter: [0, 0], checkpoint: file, selector: "li", robots: true, onRecord: r => seen.push(r) });
+  assert.equal(sum.disallowed, 1);
+  assert.deepEqual(seen.map(r => [r.url.replace(base, ""), r.skipped ? "skipped" : "read"]), [["/p/3", "skipped"], ["/p/public", "read"], ["/more", "read"]]);
+});
+
+test("without robots, a scan reads what it was given", async () => {
+  const sum = await scan(host, [`${base}/p/4`], { tabs: 1, jitter: [0, 0], selector: "li" });
+  assert.equal(sum.done, 1);
+  assert.equal(sum.disallowed, undefined);
 });

@@ -6,6 +6,7 @@
 // has to look then; nothing here tries to get past it).
 import { appendFileSync, existsSync, readFileSync, mkdirSync } from "node:fs";
 import { dirname } from "node:path";
+import { robotsReader, allowed } from "./robots.mjs";
 
 // The pages sites send automated traffic to: Google's /sorry/, reCAPTCHA, Cloudflare's challenge.
 export const BLOCKED = /\/sorry\/|\/recaptcha\/|captcha|\/cdn-cgi\/challenge-platform\//i;
@@ -73,7 +74,7 @@ async function clickUntilGone(page, name, { max = 20, pause = 900 } = {}) {
 // the records themselves go to `onRecord` and the checkpoint file as they happen.
 export async function scan(host, jobs, {
   tabs = 3, jitter = [1000, 3000], checkpoint, waitFor, clickUntilGone: more, stopOn = BLOCKED,
-  retries = 1, timeout = 45_000, rateLimitPause = 15_000, signal, onRecord = () => {}, ...pick
+  retries = 1, timeout = 45_000, rateLimitPause = 15_000, robots = false, signal, onRecord = () => {}, ...pick
 } = {}) {
   const all = normalizeJobs(jobs), done = doneKeys(checkpoint);
   const queue = all.filter(j => !done.has(j.key));
@@ -81,7 +82,11 @@ export async function scan(host, jobs, {
   if (checkpoint) mkdirSync(dirname(checkpoint), { recursive: true });
   const summary = { total: all.length, skipped: all.length - queue.length, done: 0, errors: 0, blocked: null, file: checkpoint ?? null, ms: 0 };
   const t0 = Date.now();
-  const gap = () => sleep(jitter[0] + Math.random() * Math.max(0, jitter[1] - jitter[0]));
+  // With `robots`, a page the site's robots.txt keeps crawlers out of is recorded as skipped rather
+  // than visited, and a Crawl-delay stretches the pause between pages to at least that long.
+  const rulesFor = robots ? robotsReader() : null;
+  let crawlDelayMs = 0;
+  const gap = () => sleep(Math.max(crawlDelayMs, jitter[0] + Math.random() * Math.max(0, jitter[1] - jitter[0])));
   const stopped = () => summary.blocked || signal?.aborted;
 
   const visit = async (page, job) => {
@@ -106,6 +111,17 @@ export async function scan(host, jobs, {
         const job = queue.shift();
         const { url, key, ...extra } = job;
         let record;
+        if (rulesFor) {
+          const rules = await rulesFor(new URL(url).origin);
+          if (rules.delay) crawlDelayMs = Math.max(crawlDelayMs, Math.min(rules.delay, 60) * 1000);
+          if (!allowed(rules, url)) {
+            record = { key, url, ...extra, skipped: "robots.txt asks crawlers not to visit it", at: new Date().toISOString() };
+            if (checkpoint) appendFileSync(checkpoint, JSON.stringify(record) + "\n");
+            summary.disallowed = (summary.disallowed ?? 0) + 1;
+            onRecord(record, summary);
+            continue;
+          }
+        }
         for (let attempt = 1; attempt <= retries + 1 && !stopped(); attempt++) {
           try {
             record = { key, url, ...extra, ...(await visit(page, job)), at: new Date().toISOString() };
