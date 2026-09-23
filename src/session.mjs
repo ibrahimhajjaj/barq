@@ -1073,7 +1073,7 @@ export class Barq {
     const el = element == null ? undefined : this.currentElement(element, fresh);
     if (TARGETED.has(action) && !el) throw new Error(`${action} has to be given an element`);
 
-    const commits = !allowIrreversible && GUARDED.has(action) ? commitsSomething(el) : null;
+    const commits = !allowIrreversible && GUARDED.has(action) ? commitsSomething(el, action) : null;
     if (commits) {
       return {
         status: "needs_confirmation", action, element: brief(el), because: `"${commits}"`,
@@ -1199,7 +1199,7 @@ export class Barq {
       }
       if (run.miss) { log(`  replay stops: ${run.miss}`); break; }
       // the judgment recorded with the step, and the rule on the control's words as it reads now
-      const rule = GUARDED.has(step.tool) ? commitsSomething(el) : null;
+      const rule = GUARDED.has(step.tool) ? commitsSomething(el, step.tool) : null;
       if (GUARDED.has(step.tool) && !allowIrreversible && ((step.irreversible ?? 0) >= irreversibleAt || rule)) {
         run.stop = { status: "needs_confirmation", info: "the next action looks hard to undo; call again with allow_irreversible to go ahead",
           pending: { action: step.tool, element: brief(el), ...(step.key ? { key: step.key } : {}), p_irreversible: step.irreversible ?? 0, ...(rule ? { because: `"${rule}"` } : {}) } };
@@ -1537,7 +1537,7 @@ export class Barq {
           info = "the page looks done but Jev is unsure; verify with a check, snapshot or screenshot";
           break;
         }
-        const commits = GUARDED.has(act.tool) ? commitsSomething(act.el) : null;
+        const commits = GUARDED.has(act.tool) ? commitsSomething(act.el, act.tool) : null;
         if (GUARDED.has(act.tool) && (a.irreversible.noul >= irreversibleAt || commits)) {
           // mostly done, and the next step is hard to undo: stop here rather than overstep the goal
           status = "done";
@@ -1711,7 +1711,7 @@ export class Barq {
         r.destination = brief(page.elements.find(e => e.i === onto));
       }
       // Jev's judgment, and a rule on the control's own words for when that judgment is wrong
-      const rule = GUARDED.has(act.tool) ? commitsSomething(act.el) : null;
+      const rule = GUARDED.has(act.tool) ? commitsSomething(act.el, act.tool) : null;
       if (GUARDED.has(act.tool) && !allowIrreversible && (a.irreversible.noul >= irreversibleAt || rule)) {
         status = "needs_confirmation"; info = "the next action looks hard to undo; call again with allow_irreversible to go ahead";
         pending = { action: act.tool, element: brief(act.el), ...(act.key ? { key: act.key } : {}), p_irreversible: r.irreversible, ...(rule ? { because: `"${rule}"` } : {}) };

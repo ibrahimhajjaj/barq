@@ -21,8 +21,13 @@ const BENIGN = /\b(search|filter|sort|preview|draft|save draft|send (me )?(a |th
 
 // Only the control's own wording counts. What was typed into a field is the user's content:
 // Enter in a todo box holding "buy milk" is not a purchase.
-export function commitsSomething(el) {
+// A place to type. Clicking into one or typing in it commits nothing, whatever its label says ("Post
+// body text field"); pressing Enter in one can send, so keys are still judged by the words.
+const TEXT_FIELD = /^(input:(text|email|search|url|tel|number|password)|textarea)|\[(textbox|searchbox)\]/;
+
+export function commitsSomething(el, tool) {
   if (!el) return null;
+  if ((tool === "click" || tool === "type") && (el.editable || TEXT_FIELD.test(el.tag ?? ""))) return null;
   const words = [el.label, el.text, el.placeholder, el.name].filter(Boolean).join(" ").slice(0, 200);
   if (!words.trim() || BENIGN.test(words)) return null;
   const hit = COMMIT.map(re => words.match(re)).find(Boolean);
