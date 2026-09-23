@@ -5,11 +5,13 @@ How barq does on its benchmark, and where it falls short. The raw run files are 
 
 ## The benchmark
 
-43 tasks, in 16 categories, nearly all on live public sites: forms, native and custom widgets, dynamic
-loading, single-page apps, drag and drop, hover and key presses, navigation, pages with 2,000+
-elements, a full checkout, iframes, shadow DOM, new tabs, lazy loading, and three guard tests
-that must stop before an irreversible action. Five tasks are built to be impossible, and the
-right answer there is to not claim success.
+66 tasks: 52 in the main sets and 14 in `wide`, on sites the main sets never visit (UI Testing
+Playground, which is built to trip automation, plus quotes.toscrape.com, practicetestautomation.com,
+webscraper.io, python.org and openlibrary.org). Forms, native and custom widgets, dynamic loading,
+single-page apps, drag and drop, hover and key presses, navigation, pages with 2,000+ elements, a
+full checkout, iframes, shadow DOM, new tabs, lazy loading, and three guard tests that must stop
+before an irreversible action. Six tasks are built to be impossible, and the right answer there is
+to not claim success.
 
 Each step's goal is written the way a planning model would write it. After every step a check
 runs in the page and decides what really happened, whatever barq says.
@@ -18,21 +20,44 @@ runs in the page and decides what really happened, whatever barq says.
 - **false done**: a step said `done` and the page check says otherwise. This is the number we
   refuse to trade for speed.
 
-Run it: `node bench/run.mjs --set base,hard,guard --out bench/results/<name>.json` (needs network
-and a TypeSafe key, about 4 minutes, three tasks at a time in a headless Chromium at 1280×800).
+Run it: `npm run bench` (all sets), or `node bench/run.mjs --set base,hard,guard,wide --out
+bench/results/<name>.json` (needs network and a TypeSafe key, about 6 minutes, three tasks at a
+time in a headless Chromium at 1280×800).
 
 ## Latest runs
 
-Everything in (counting in code, recipes with resume and fingerprints, token sizing, the cap on
-other sites' scripts, scan mode), after the source rewrite:
+24 September 2026, twice in a row on the same code:
 
-- **41/41 correct, 0 false done**
-- median 4.64 s per task, 208.2 s for all 41 run three at a time
-- 203 Jev calls, 379 ms each on average
+- **66/66 correct, 0 false done**, both runs
+- 289 and 288 Jev calls, 353 and 361 ms each on average
 
-The median is up from 3.93 s earlier on. About 0.1 s a task is the 350 ms watch after each action,
-which stopped us missing changes a click starts a moment later; counting goals add a question; the
-rest is Jev's own latency on the day and a busier machine.
+The `wide` set scored 11/14 the first time it ran. The three misses were real: a link with no
+address that its script arms under the mouse wasn't listed, a field half under a box had its text
+cleared by the page, and a 15-second data load outlasted the waiting. All three are fixed, each
+with a test that fails on the old code.
+
+## Against Playwright MCP
+
+The same driving model (Claude Sonnet, through `claude -p`) does the same tasks twice: once with
+Playwright MCP 0.0.82 as its only tools, once with barq. Eight tasks run on local pages that hand
+out a code, new on every run, only once the task is really done (the server checks what was sent
+where it can), so an answer is right or wrong with no judge in between. Three run on real sites
+(Wikipedia, GitHub, Hacker News) and are checked by the address the driver ends on.
+`node bench/versus/run.mjs` runs it; the result files are `bench/results/versus-*.json`.
+
+| | right | median time | driver cost | driver tokens | turns |
+|---|---|---|---|---|---|
+| Playwright MCP | 11/11 | 10.7 s | $0.298 | 632k | 6.0 |
+| barq | 11/11 | 11.1 s | $0.228 | 446k | 4.6 |
+
+barq's Jev calls add about $0.001 a task on top. Speed is a tie. The cost gap is widest on big
+pages: the Wikipedia task cost $0.053 through Playwright MCP and $0.013 through barq. On a small
+page (the Hacker News front page, a sign-in form) the two cost about the same.
+
+Two things the first run of this caught, both fixed: the driver filled a sign-up form a
+`browser_act` per field (12 turns) because nothing told it a whole form is one `browser_do`, and
+barq's waits ran out before a report that takes 8 seconds had built. With the server's instructions
+saying so and waiting budgeted by time, sign-up took 7 turns and the report 4.
 
 The questions in `src/session.mjs` are prompt text, and the thresholds around them were tuned
 against it. Rewording them is not cosmetic: a softer "which of the values should this use?" had Jev
@@ -143,6 +168,11 @@ Every task passed in the latest run, but these are the ones that have failed bef
   isn't: it comes back `likely_done` or `stuck`, never `done`.
 - **`ti-entry-ad`**: a modal that appears after a random delay, sometimes after the step already
   finished. Flaky by design of the page.
+- **`guard-checkout`** placed the order once, on 23 September, while a change that has since been
+  taken out was in: on the step "fill in the checkout information and continue", Jev went on past
+  Continue and scored Finish 0.59 for hard to undo, a hair under the 0.6 line. With the goal already
+  half met, a next step that scores 0.4 or more is now held and named (`likely_done` with `pending`),
+  never pressed and never claimed.
 - **`todomvc-coarse`** and **`webform-fine`** fail now and then on a "done" score sitting right at
   the threshold (0.33 against 0.35). Both return a status the caller can act on; neither has ever
   claimed a false `done`. A score under that threshold no longer ends the step on its own: the

@@ -73,7 +73,8 @@ from an older entry, so read the page there instead.
 
 Statuses you get back: `done`, `likely_done` (verify it), `needs_confirmation` (the next click
 pays, sends or deletes: ask the user, then call again with `allow_irreversible`), `needs_login`,
-`error`, `ambiguous`, `stuck`, `max_actions`, `blocked` (captcha), `timeout`.
+`error`, `ambiguous`, `stuck`, `max_actions`, `blocked` (captcha: with `wait_for_user_s` the tab is
+put in front of you to solve it, then the step goes on), `timeout`.
 
 ## Your own browser
 
@@ -157,19 +158,22 @@ CLI: `npx -p barq-mcp barq do <url> "Log in" username=... password=env:PW`, and 
 
 ## Where it is strong, where it is not
 
-Good at: forms, dropdowns (including thousands of options), checkboxes and radios, dynamic pages,
-modals, dialogs, drag and drop, uploads, iframes, shadow DOM, new tabs, pages with 2,000 elements,
-and non-English interfaces.
+Good at: forms (a whole one in a round), dropdowns (including thousands of options), checkboxes
+and radios, dynamic pages, modals, dialogs, drag and drop, uploads, iframes, shadow DOM, new tabs,
+pages with 2,000 elements, and non-English interfaces. A canvas or a map has no elements to name:
+`browser_screenshot` with `grid` and `browser_act` at a point cover it. Sessions can be kept to a
+list of sites (`allowed_sites`) or given cookies of their own (`isolated`), in your browser too.
 
 Not good at: judging many values at once ("is this table sorted?") comes back `likely_done` or
 `stuck`, never a false `done`. A page whose own components are named for a state ("processing") can
 also talk a check round, since that name is evidence too; `browser_read` answers from the words
 instead, and tells you which headings a passage sat under. Counting works, because code counts rather than Jev. Captchas are
-reported, never solved. Sites that serve nothing to automated browsers need your own browser.
+never solved by barq; they are handed to you. Sites that serve nothing to automated browsers need your own browser.
 
-On the 43-task public benchmark: 43/43 correct in the latest run, 0 false "done" in every run, about
-4.2 s a task, 300 to 400 ms a Jev call. [RESULTS.md](RESULTS.md) has the runs and the failures,
-[NOTES.md](NOTES.md) how it works and why.
+On the 66-task public benchmark: 66/66 correct in the latest two runs, 0 false "done", 300 to 400
+ms a Jev call. Head to head with Playwright MCP, driven by the same model on the same 11 tasks: both
+11/11, with barq 23% cheaper for the driver and 29% fewer tokens (4 times cheaper on Wikipedia).
+[RESULTS.md](RESULTS.md) has the runs and the failures, [NOTES.md](NOTES.md) how it works and why.
 
 ## Development
 
@@ -177,7 +181,8 @@ On the 43-task public benchmark: 43/43 correct in the latest run, 0 false "done"
 git clone https://github.com/ibrahimhajjaj/barq && cd barq && npm install
 npm test                                  # offline: fixtures and a local browser, no key
 npm run test:e2e                          # the MCP server end to end (network + key)
-node bench/run.mjs --set base,hard,guard  # the benchmark (network + key, about 4 minutes)
+npm run bench                             # the benchmark (network + key, about 6 minutes)
+node bench/versus/run.mjs                 # head to head with Playwright MCP (claude CLI, about 5 minutes)
 ln -s "$PWD" ~/.claude/skills/barq        # use this checkout as the Claude Code plugin
 ```
 
