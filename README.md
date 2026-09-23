@@ -36,7 +36,7 @@ For its own browser, fetch Chromium once: `npx playwright install chromium`.
 Any other MCP client:
 
 ```bash
-claude mcp add barq -e TYPESAFE_API_KEY=your-key -- npx -y -p barq barq-mcp
+claude mcp add barq -e TYPESAFE_API_KEY=your-key -- npx -y barq-mcp
 ```
 
 Or from a clone:
@@ -127,8 +127,8 @@ back, and refuses any menu whose logins belong to another site.
 When you already know the URLs, skip the decision model entirely:
 
 ```bash
-npx barq scan urls.txt --js "document.querySelector('h1').innerText" --out titles.jsonl
-BARQ_ATTACH=edge npx barq scan jobs.json --selector li --click-until-gone "View more" --tabs 3
+npx -p barq-mcp barq scan urls.txt --js "document.querySelector('h1').innerText" --out titles.jsonl
+BARQ_ATTACH=edge npx -p barq-mcp barq scan jobs.json --selector li --click-until-gone "View more" --tabs 3
 ```
 
 One JSON line per page, a rerun skips what is done, one retry per page, and everything stops if a
@@ -139,7 +139,7 @@ a real browser took about 2 s a page and no model tokens per page.
 ## From Node
 
 ```js
-import { Barq, scan, openBrowser } from "barq";
+import { Barq, scan, openBrowser } from "barq-mcp";
 
 const b = await Barq.launch({ headed: true });
 await b.open("https://www.saucedemo.com");
@@ -153,7 +153,7 @@ await scan(browser, urls, { tabs: 3, js: "document.title", checkpoint: "out.json
 await browser.dispose();
 ```
 
-CLI: `npx barq do <url> "Log in" username=... password=env:PW`, and `npx barq run flow.json`.
+CLI: `npx -p barq-mcp barq do <url> "Log in" username=... password=env:PW`, and `npx -p barq-mcp barq run flow.json`.
 
 ## Where it is strong, where it is not
 
