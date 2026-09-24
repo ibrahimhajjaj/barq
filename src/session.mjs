@@ -944,7 +944,12 @@ export class Barq {
 
     const text = await resolveValue(act.value);
     await this.uncover(loc);
-    await loc.fill("", opts);
+    // A web address goes in whole, the way a paste does. Typed key by key, every partial address is
+    // a change of its own, and a page that looks each one up ("find this video") can end on the
+    // answer for a half-typed one: "Unable to find" for a link that is fine. Emptying the field
+    // first would be one more such change, so the whole value simply replaces what was there.
+    const atOnce = text.length > 120 || /^[a-z][\w+.-]*:\/\/\S+$/i.test(text);
+    await (atOnce ? loc.focus(opts) : loc.fill("", opts));
     // Keys go wherever the focus is, not to the field they were meant for. A page can move it the
     // moment the field is focused: a search box that opens its real search in an overlay, or a
     // popup that grabs the focus for its own button, where a space in the text would press it.
@@ -962,8 +967,8 @@ export class Barq {
     // of time halfway, leaving the field cut short. Whatever the keys didn't finish is filled in
     // one go instead, which is the whole value.
     let typed = true;
-    if (text.length <= 120) typed = await loc.pressSequentially(text, { delay: 5, ...opts }).then(() => true, e => { if (/timeout/i.test(e?.name ?? "") || /Timeout/.test(e?.message ?? "")) return false; throw e; });
-    if (!typed || text.length > 120) await loc.fill(text, opts);
+    if (!atOnce) typed = await loc.pressSequentially(text, { delay: 5, ...opts }).then(() => true, e => { if (/timeout/i.test(e?.name ?? "") || /Timeout/.test(e?.message ?? "")) return false; throw e; });
+    if (!typed || atOnce) await loc.fill(text, opts);
     // a masked or otherwise fussy field may have taken something else: put it right in one go
     const inField = await loc.inputValue({ timeout: 1000 }).catch(() => null);
     if (inField !== null && inField !== text) await loc.fill(text, opts);

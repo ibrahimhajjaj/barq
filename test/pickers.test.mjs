@@ -151,3 +151,15 @@ test("a field half under a box is scrolled out from under it before anything is 
   await b.typeInto(b.page.locator("#name"), { value: "Ada" }, { timeout: 4000 });
   assert.equal(await b.page.inputValue("#name"), "Ada");
 });
+
+test("a web address goes in whole, so a page that looks up each change ends on the full one", async () => {
+  // each change starts a lookup, and a shorter (earlier) value's answer comes back last
+  await b.page.setContent(`<input id="video" aria-label="Link to the video"><p id="status"></p><script>
+    const f = document.getElementById("video"), out = document.getElementById("status");
+    f.addEventListener("input", () => { const v = f.value; setTimeout(() => { out.textContent = /^https:\\/\\/youtu\\.be\\/[\\w-]{11}$/.test(v) ? "Found the video" : "Unable to find a YouTube video"; }, 600 - v.length * 10); });
+  </script>`);
+  await b.typeInto(b.page.locator("#video"), { value: "https://youtu.be/R-d4mVXHGPs" }, { timeout: 4000 });
+  await new Promise(done => setTimeout(done, 900));
+  assert.equal(await b.page.textContent("#status"), "Found the video");
+  assert.equal(await b.page.inputValue("#video"), "https://youtu.be/R-d4mVXHGPs");
+});
