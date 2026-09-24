@@ -47,7 +47,9 @@ export const ENUMERATE = ({ start, frame }) => {   // start: the first number to
   // Anything with a pointer cursor its parent doesn't have is usually a JS-bound control: a div,
   // a span or a table header someone hung a click handler on.
   const behavesClickable = (el, tag) => {
-    if (["html", "body", "label", "svg", "path"].includes(tag) || !el.parentElement) return false;
+    // an icon drawn as <svg> with its own pointer cursor is the control (a delete ✕ on a thumbnail);
+    // its <path>s inherit the cursor and so never count on their own
+    if (["html", "body", "label", "path"].includes(tag) || !el.parentElement) return false;
     return getComputedStyle(el).cursor === "pointer"
       && getComputedStyle(el.parentElement).cursor !== "pointer"
       && !el.parentElement.closest("a, button, [role=button]");
@@ -172,6 +174,23 @@ export const ENUMERATE = ({ start, frame }) => {   // start: the first number to
       if (named.length === 1 && word.test(named[0])) label = tidy(named[0]);
     }
     if (label && label !== text) o.label = label;
+    // An icon with no words at all: the site's own names for it (a test id, a class like
+    // "removeIcon") usually say what it does, and that is all there is to go on.
+    if (!o.text && !o.label) {
+      // an icon inside counts only when it is all the element holds (a button that is just a ✕),
+      // never when the element also shows something else, like a thumbnail holding its own ✕
+      const only = el.children.length === 1 ? el.firstElementChild : null;
+      const hint = iconHint(el) || (only?.matches("svg, i, span, [class*=icon], [class*=Icon]") ? iconHint(only) : "");
+      if (hint) o.label = `${hint} icon`;
+    }
+  };
+
+  const ICON_WORDS = /(remove|delete|trash|close|dismiss|clear|cancel|edit|pencil|more|menu|kebab|settings|gear|search|add|plus|play|pause|next|prev|previous|back|share|download|upload|copy|expand|collapse|drag|handle|like|heart|star|bookmark)/i;
+  const iconHint = el => {
+    if (!el) return "";
+    const said = [el.getAttribute("data-test"), el.getAttribute("data-testid"), el.getAttribute("data-icon"), classOf(el), el.id].filter(Boolean).join(" ");
+    const m = said.replace(/[-_]/g, " ").replace(/([a-z])([A-Z])/g, "$1 $2").match(ICON_WORDS);
+    return m ? m[1].toLowerCase() : "";
   };
 
   // A custom element's attributes and classes mean whatever its app decided; aria-pressed and the

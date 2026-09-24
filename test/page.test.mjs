@@ -1175,3 +1175,16 @@ test("a link with no address that its script arms under the mouse is listed", as
   assert.ok(!els.some(e => e.text === "just a tooltip"), "a hover on anything but a link is not a control");
   await b2.close();
 });
+
+test("a wordless icon that is the control is listed, named by what the site calls it", async () => {
+  const b2 = await Barq.launch({ browser });
+  await b2.page.setContent(`<div class="thumb sel" style="position:relative;width:80px;height:60px" onclick="1">
+      <img alt="" width="80" height="60" src="data:image/gif;base64,R0lGODlhAQABAAAAACw=">
+      <svg class="styles_removeIcon__x1" width="14" height="14" style="position:absolute;top:2px;right:2px;cursor:pointer"><path d="M1 1l12 12"/></svg></div>
+    <button data-testid="dialog-close"><svg width="12" height="12"><path d="M1 1l10 10"/></svg></button>`);
+  const els = (await b2.snapshot()).elements;
+  assert.ok(els.some(e => e.tag === "svg" && e.label === "remove icon"), JSON.stringify(els));
+  assert.ok(els.some(e => e.tag === "button" && e.label === "close icon"));
+  assert.ok(!els.some(e => e.tag === "div" && e.label), "the thumbnail doesn't borrow its ✕'s name");
+  await b2.close();
+});
