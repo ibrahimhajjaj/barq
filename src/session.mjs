@@ -61,7 +61,7 @@ const WATCH_MUTATIONS = () => {
     const wait = 50 - (performance.now() - last);
     if (wait > 0) { later = true; setTimeout(() => { later = false; report(); }, wait); return; }
     last = performance.now();
-    window.__jevChanged?.().catch(() => {});
+    try { window.__jevChanged?.(""); } catch {}
   };
   const mo = new MutationObserver(recs => {
     if (!recs.some(r => r.attributeName !== "data-jev-i")) return;
@@ -375,7 +375,29 @@ export class Barq {
       if (this.waitUntil > Date.now()) f.evaluate(v => { window.__jevWaiting = v; }, this.waitUntil).catch(() => {});
       this.wakeSettle();
     });
-    await p.exposeBinding("__jevChanged", () => { this.lastChangeAt = Date.now(); this.wakeSettle(); });
+    // A plain protocol binding rather than exposeBinding: that one puts Playwright's own helpers
+    // into the page scripts of every frame, and a Cloudflare Turnstile widget that finds them never
+    // issues its token, so the site's form refuses to submit, even for a person clicking in the tab.
+    // The binding belongs to one process, so a frame from another site gets its own.
+    const bound = new WeakMap();
+    const bind = async target => {
+      const s = await p.context().newCDPSession(target);
+      s.on("Runtime.bindingCalled", e => { if (e.name === "__jevChanged") { this.lastChangeAt = Date.now(); this.wakeSettle(); } });
+      await s.send("Runtime.enable");
+      await s.send("Runtime.addBinding", { name: "__jevChanged" });
+      return s;
+    };
+    await bind(p);
+    // a frame gets a process of its own when it goes to another site; only then does a session open
+    const bindFrame = async f => {
+      if (f === p.mainFrame()) return;
+      const s = await bind(f).catch(() => null);
+      if (!s) return;
+      bound.get(f)?.detach().catch(() => {});
+      bound.set(f, s);
+    };
+    p.on("framenavigated", bindFrame);
+    await Promise.all(p.frames().map(bindFrame));
     await p.addInitScript(WATCH_MUTATIONS);
     // the documents already loaded (or loading) in this tab's frames missed the init script
     await Promise.all(p.frames().map(f => f.evaluate(WATCH_MUTATIONS).catch(() => {})));
