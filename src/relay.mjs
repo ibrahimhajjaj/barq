@@ -53,7 +53,7 @@ const reachable = (port, host, timeout = 1000) => new Promise(resolve => {
 // Serve `upstream` (the browser's ws:// endpoint). Resolves once connected and listening, with
 // { url, close }; rejects when the browser refuses or the user doesn't allow the connection.
 
-export async function startRelay(upstream, { idleMs = IDLE_MS, onExit = () => {}, log = () => {} } = {}) {
+export async function startRelay(upstream, { idleMs = IDLE_MS, parkMs = IDLE_MS, onExit = () => {}, log = () => {} } = {}) {
   const up = new WebSocket(upstream, { perMessageDeflate: false, maxPayload: MAX_MESSAGE });
   // This connection is the only thing holding the browser's "Allow remote debugging" prompt on
   // screen, so there is no deadline on it: dropping it would take the prompt away with it, and a
@@ -79,6 +79,7 @@ export async function startRelay(upstream, { idleMs = IDLE_MS, onExit = () => {}
   const clients = new Set();
   const owner = new Map();       // session id -> the client it belongs to
   const pending = new Map();     // upstream message id -> { client, id } or { resolve, reject }
+  const parked = new Map();      // key -> { tabs, contexts, timer }: what a client that left meaning to come back owns
   let nextId = 1, idleTimer, closed = false;
   const send = msg => { if (up.readyState === WebSocket.OPEN) up.send(JSON.stringify(msg)); };
   const call = (method, params = {}, sessionId) => new Promise((resolve, reject) => {
@@ -111,6 +112,7 @@ export async function startRelay(upstream, { idleMs = IDLE_MS, onExit = () => {}
         for (const ev of p.client.held.splice(0)) fromBrowser(ev);
         return deliver(p.client, { ...msg, id: p.id });
       }
+      if (p.method === "Target.createBrowserContext" && msg.result?.browserContextId) p.client.contexts.add(msg.result.browserContextId);
       if (p.method === "Target.getTargets" && Array.isArray(msg.result?.targetInfos)) msg = { ...msg, result: { ...msg.result, targetInfos: msg.result.targetInfos.filter(t => !p.client.hidden.has(t.targetId)) } };
       return deliver(p.client, { ...msg, id: p.id });
     }
@@ -159,15 +161,58 @@ export async function startRelay(upstream, { idleMs = IDLE_MS, onExit = () => {}
   const wss = new WebSocketServer({ noServer: true, perMessageDeflate: false, maxPayload: MAX_MESSAGE });
   server.on("upgrade", (req, socket, head) => {
     // web pages send an Origin; the token keeps other local programs out
-    const ok = req.url === `/${token}` && !req.headers.origin && /^(127\.0\.0\.1|localhost)(:\d+)?$/.test(req.headers.host ?? "");
+    const at = new URL(req.url ?? "/", "http://relay");
+    const ok = at.pathname === `/${token}` && !req.headers.origin && /^(127\.0\.0\.1|localhost)(:\d+)?$/.test(req.headers.host ?? "");
     if (!ok) { socket.end("HTTP/1.1 403 Forbidden\r\n\r\n"); return; }
-    wss.handleUpgrade(req, socket, head, ws => serve(ws));
+    wss.handleUpgrade(req, socket, head, ws => serve(ws, at.searchParams.get("claim")));
   });
 
-  function serve(ws) {
-    const c = { ws, root: null, tabs: new Set(), hidden: new Set(), asked: new Set(), creating: 0, held: [] };
+  // Tabs a client left behind, and its private browser contexts; closing one that is already gone
+  // just fails.
+  const drop = ({ tabs, contexts }) => {
+    for (const targetId of tabs) send({ id: nextId++, method: "Target.closeTarget", params: { targetId } });
+    for (const browserContextId of contexts) send({ id: nextId++, method: "Target.disposeBrowserContext", params: { browserContextId } });
+  };
+
+  // Tabs opened from a parked tab while its client was away (the user following a link) belong
+  // with it: nobody else is attached to them.
+  const withOpened = (tabs, infos) => {
+    for (let grew = true; grew;) {
+      grew = false;
+      for (const t of infos) if (t.type === "page" && !tabs.has(t.targetId) && tabs.has(t.openerId)) { tabs.add(t.targetId); grew = true; }
+    }
+    return tabs;
+  };
+  // Keep a client's tabs under `key` until it comes back for them, or close them once it hasn't.
+  const park = (key, { tabs, contexts }) => {
+    const left = { tabs, contexts };
+    // the entry stays until its tabs are closed: a relay stopping meanwhile closes them itself
+    left.timer = setTimeout(() => {
+      if (parked.get(key) !== left) return;
+      call("Target.getTargets", { filter: [{}] }).then(r => withOpened(left.tabs, r.targetInfos), () => {}).finally(() => {
+        if (parked.get(key) !== left) return;
+        parked.delete(key);
+        log(`nobody came back for ${left.tabs.size} parked tab(s); closing them`);
+        drop(left);
+      });
+    }, parkMs);
+    left.timer.unref?.();
+    parked.set(key, left);
+  };
+
+  // claim: the key a client's tabs were parked under, to have them back
+  function serve(ws, claim) {
+    const c = { ws, root: null, tabs: new Set(), hidden: new Set(), asked: new Set(), contexts: new Set(), parkKey: null, creating: 0, held: [] };
+    const back = claim && parked.get(claim);
+    if (back) {
+      parked.delete(claim); clearTimeout(back.timer);
+      c.tabs = back.tabs; c.contexts = back.contexts;
+      // held under the same key until the client says it is up (Relay.claimed): one that drops
+      // while connecting leaves them parked, not closed
+      c.parkKey = claim;
+    }
     clients.add(c); idle();
-    log(`client connected (${clients.size} now)`);
+    log(`client connected (${clients.size} now)${back ? `, taking back ${back.tabs.size} tab(s) it left` : ""}`);
     // Everything open before a client came (the user's tabs, another client's) stays out of its
     // sight: it never needs any of it, reading it isn't its business, and one thing the browser has
     // put to sleep would hold up its startup, which sets up everything it is shown. The empty
@@ -175,7 +220,11 @@ export async function startRelay(upstream, { idleMs = IDLE_MS, onExit = () => {}
     // default: a browser in use has service workers, shared workers, out-of-process frames and a
     // tab target per tab, and an attach waits on those too.
     const ready = call("Target.getTargets", { filter: [{}] })
-      .then(r => { for (const t of r.targetInfos) if (["page", "background_page", "tab"].includes(t.type)) c.hidden.add(t.targetId); })
+      // (a tab it is taking back is its own)
+      .then(r => {
+        if (back) withOpened(c.tabs, r.targetInfos);
+        for (const t of r.targetInfos) if (["page", "background_page", "tab"].includes(t.type) && !c.tabs.has(t.targetId)) c.hidden.add(t.targetId);
+      })
       .then(() => call("Target.attachToBrowserTarget")).then(r => { c.root = r.sessionId; owner.set(c.root, c); });
     ready.catch(() => ws.close());
     ws.on("message", async data => {
@@ -187,6 +236,20 @@ export async function startRelay(upstream, { idleMs = IDLE_MS, onExit = () => {}
       if (!c.root || ws.readyState !== WebSocket.OPEN) return;
       const sessionId = msg.sessionId ?? c.root;
       if (owner.get(sessionId) !== c) return deliver(c, { id: msg.id, sessionId: msg.sessionId, error: { code: -32001, message: "Session with given id not found." } });
+      // The relay's own methods. A client that means to come back parks before it leaves: its
+      // tabs then stay open for it instead of being closed, and connecting again with
+      // ?claim=<key> hands them back. The key is the relay's, random and used once, so no two
+      // clients can share one. Asking for the version is how a client learns parking exists.
+      if (msg.method.startsWith("Relay.")) {
+        const reply = r => deliver(c, { id: msg.id, sessionId: msg.sessionId, ...r });
+        if (msg.method === "Relay.getVersion") return reply({ result: { version: 1, park: true } });
+        if (msg.method === "Relay.park") {
+          c.parkKey = crypto.randomBytes(18).toString("base64url");
+          return reply({ result: { key: c.parkKey, keptMs: parkMs } });
+        }
+        if (msg.method === "Relay.claimed") { c.parkKey = null; return reply({ result: {} }); }
+        return reply({ error: { code: -32601, message: `'${msg.method}' wasn't found` } });
+      }
       // the browser is the user's: a client may leave it, never close it
       if (msg.method === "Browser.close" || msg.method === "Browser.crash" || msg.method === "Browser.crashGpuProcess") { deliver(c, { id: msg.id, result: {} }); return ws.close(); }
       // nor reach, by name, a tab kept out of its sight
@@ -196,6 +259,7 @@ export async function startRelay(upstream, { idleMs = IDLE_MS, onExit = () => {}
       const id = nextId++;
       if (msg.method === "Target.createTarget") c.creating++;
       if (msg.method === "Target.attachToTarget" && msg.params?.targetId) c.asked.add(msg.params.targetId);
+      if (msg.method === "Target.disposeBrowserContext") c.contexts.delete(msg.params?.browserContextId);
       pending.set(id, { client: c, id: msg.id, method: msg.method });
       send({ ...msg, id, sessionId });
     });
@@ -205,9 +269,15 @@ export async function startRelay(upstream, { idleMs = IDLE_MS, onExit = () => {}
       for (const [id, p] of pending) if (p.client === c) pending.delete(id);
       // the sessions it opened go with its browser-level one
       if (c.root) send({ id: nextId++, method: "Target.detachFromTarget", params: { sessionId: c.root } });
-      // tabs it opened and never closed; closing one that is already gone just fails
-      for (const targetId of c.tabs) send({ id: nextId++, method: "Target.closeTarget", params: { targetId } });
-      log(`client left (${clients.size} now)${c.tabs.size ? `, closing ${c.tabs.size} tab(s) it left open` : ""}`);
+      if (c.parkKey && !closed) {
+        // it said it is coming back: its tabs wait for it, for as long as the relay would wait for anyone
+        park(c.parkKey, c);
+        log(`client left (${clients.size} now), keeping ${c.tabs.size} tab(s) for its return`);
+      } else {
+        // tabs it opened and never closed
+        drop(c);
+        log(`client left (${clients.size} now)${c.tabs.size ? `, closing ${c.tabs.size} tab(s) it left open` : ""}`);
+      }
       idle();
     });
   }
@@ -217,7 +287,9 @@ export async function startRelay(upstream, { idleMs = IDLE_MS, onExit = () => {}
     log(`stopping: ${why}`);
     clearTimeout(idleTimer);
     // going away with clients still on it: their tabs go too, as when a client leaves by itself
-    for (const c of clients) for (const targetId of c.tabs) send({ id: nextId++, method: "Target.closeTarget", params: { targetId } });
+    for (const c of clients) drop(c);
+    for (const p of parked.values()) { clearTimeout(p.timer); drop(p); }
+    parked.clear();
     // the relay is going away: its clients' sockets are cut, not asked to close politely
     for (const c of clients) c.ws.terminate();
     wss.close(); server.close(); up.close();

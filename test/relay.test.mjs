@@ -1,6 +1,7 @@
 // Offline tests: the relay shares one debugging connection to a running browser between clients.
 import { test, after } from "node:test";
 import assert from "node:assert/strict";
+import http from "node:http";
 import { spawn } from "node:child_process";
 import { mkdtempSync, existsSync, rmSync, statSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -177,4 +178,104 @@ test("relayEndpoint starts one relay per browser run and hands every caller the 
   br.proc.kill(); await br.exited;
   for (let i = 0; i < 50 && existsSync(file); i++) await sleep(100);
   assert.ok(!existsSync(file));
+});
+
+// The titles of the browser's page targets, seen straight from the browser.
+const titlesIn = async br => (await raw(br.ws, { id: 1, method: "Target.getTargets" })).result.targetInfos.filter(t => t.type === "page").map(t => t.title);
+
+test("a client that parks before leaving keeps its tabs, and gets them back by claiming them", async () => {
+  const br = await startBrowser();
+  const relay = await startRelay(br.ws, { parkMs: 1500 });
+  cleanups.push(() => relay.close());
+  const a = await chromium.connectOverCDP(relay.url, { noDefaults: true });
+  const s = await a.newBrowserCDPSession();
+  assert.deepEqual(await s.send("Relay.getVersion"), { version: 1, park: true });
+  const p = await a.contexts()[0].newPage();
+  await p.goto("data:text/html,<title>parked</title>");
+  await p.evaluate(() => { window.state = "typed in"; });
+  const { key, keptMs } = await s.send("Relay.park");
+  assert.equal(keptMs, 1500);
+  await a.close();
+  await sleep(300);
+  assert.ok((await titlesIn(br)).includes("parked"), "still open while its client is away");
+  // someone else connecting meanwhile doesn't see it
+  const other = await chromium.connectOverCDP(relay.url, { noDefaults: true });
+  assert.equal(other.contexts()[0].pages().length, 0);
+  await other.close();
+  // a key nobody parked under changes nothing, and the right one hands the tab back as it was
+  const stranger = await chromium.connectOverCDP(`${relay.url}?claim=nobody`, { noDefaults: true });
+  assert.equal(stranger.contexts()[0].pages().length, 0);
+  await stranger.close();
+  const back = await chromium.connectOverCDP(`${relay.url}?claim=${key}`, { noDefaults: true });
+  const [q] = back.contexts()[0].pages();
+  assert.equal(await q.evaluate(() => window.state), "typed in");
+  await (await back.newBrowserCDPSession()).send("Relay.claimed");
+  // leaving without parking this time closes it, as before
+  await back.close();
+  for (let i = 0; i < 30 && (await titlesIn(br)).includes("parked"); i++) await sleep(100);
+  assert.ok(!(await titlesIn(br)).includes("parked"));
+});
+
+test("parked tabs nobody comes back for are closed after a while, with any they opened meanwhile", async () => {
+  const br = await startBrowser();
+  const site = http.createServer((req, res) => { res.setHeader("content-type", "text/html"); res.end(req.url === "/opened" ? "<title>opened while away</title>" : `<title>forgotten</title><a href="/opened" target=_blank>x</a>`); });
+  await new Promise(r => site.listen(0, "127.0.0.1", r));
+  cleanups.push(() => site.close());
+  const relay = await startRelay(br.ws, { parkMs: 8000 });
+  cleanups.push(() => relay.close());
+  const a = await chromium.connectOverCDP(relay.url, { noDefaults: true });
+  const s = await a.newBrowserCDPSession();
+  await assert.rejects(s.send("Relay.nothing"), /wasn't found/);
+  const p = await a.contexts()[0].newPage();
+  await p.goto(`http://127.0.0.1:${site.address().port}/`);
+  await s.send("Relay.park");
+  await a.close();
+  // the user follows a link in the parked tab
+  const user = await chromium.connectOverCDP(br.ws, { noDefaults: true });
+  const tab = user.contexts()[0].pages().find(x => x.url().endsWith("/"));
+  await tab.click("a");
+  for (let i = 0; i < 50 && !(await titlesIn(br)).includes("opened while away"); i++) await sleep(100);
+  await user.close();
+  assert.ok((await titlesIn(br)).includes("forgotten") && (await titlesIn(br)).includes("opened while away"));
+  for (let i = 0; i < 120 && (await titlesIn(br)).some(t => t === "forgotten" || t === "opened while away"); i++) await sleep(100);
+  const left = await titlesIn(br);
+  assert.ok(!left.includes("forgotten") && !left.includes("opened while away"), `still open: ${left}`);
+});
+
+test("a client that drops while taking its tabs back leaves them parked; each park gets a key of its own", async () => {
+  const br = await startBrowser();
+  const relay = await startRelay(br.ws, { parkMs: 60_000 });
+  cleanups.push(() => relay.close());
+  const a = await chromium.connectOverCDP(relay.url, { noDefaults: true });
+  const s = await a.newBrowserCDPSession();
+  const p = await a.contexts()[0].newPage();
+  await p.goto("data:text/html,<title>kept twice</title>");
+  const { key } = await s.send("Relay.park");
+  await a.close();
+  const b = await chromium.connectOverCDP(relay.url, { noDefaults: true });
+  const other = await (await b.newBrowserCDPSession()).send("Relay.park");
+  assert.notEqual(other.key, key);
+  await b.close();
+  // connects with the key, then goes before saying it is up
+  const flaky = await chromium.connectOverCDP(`${relay.url}?claim=${key}`, { noDefaults: true });
+  assert.equal(flaky.contexts()[0].pages().length, 1);
+  await flaky.close();
+  await sleep(300);
+  assert.ok((await titlesIn(br)).includes("kept twice"), "still parked");
+  const back = await chromium.connectOverCDP(`${relay.url}?claim=${key}`, { noDefaults: true });
+  assert.equal(await back.contexts()[0].pages()[0].title(), "kept twice");
+  await back.close();
+});
+
+test("parked tabs are closed even when the relay stops at the moment they run out", async () => {
+  const br = await startBrowser();
+  const relay = await startRelay(br.ws, { parkMs: 500, idleMs: 500 });
+  const a = await chromium.connectOverCDP(relay.url, { noDefaults: true });
+  const p = await a.contexts()[0].newPage();
+  await p.goto("data:text/html,<title>both timers</title>");
+  await (await a.newBrowserCDPSession()).send("Relay.park");
+  await a.close();
+  for (let i = 0; i < 40 && (await titlesIn(br)).includes("both timers"); i++) await sleep(100);
+  assert.ok(!(await titlesIn(br)).includes("both timers"));
+  relay.close("done");
 });

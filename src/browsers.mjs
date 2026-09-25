@@ -246,7 +246,8 @@ export class AttachedBrowser {
   visible = true;   // the user's own browser, in front of them
   kind = "attach";
 
-  static async connect(spec = "auto", { placement = "auto", group = {}, size = { width: 1280, height: 800 }, allowTimeoutMs = 120_000 } = {}) {
+  // claim: what park() returned last time, to have the tabs left in the relay back
+  static async connect(spec = "auto", { placement = "auto", group = {}, size = { width: 1280, height: 800 }, allowTimeoutMs = 120_000, claim = null } = {}) {
     const endpoint = await findEndpoint(spec);
     // The tabs the user has open can no longer hold this up: a connection is only ever shown the
     // tabs it opened. So the wait is the browser asking to be allowed, and that is what to say.
@@ -255,14 +256,18 @@ export class AttachedBrowser {
     // connection per browser run is shared through a relay process, so a new server (another agent
     // session, a restart) doesn't ask again. Straight to the browser when the relay is off or
     // can't run here.
-    let url = endpoint.ws;
+    let url = endpoint.ws, relay = null;
     if (process.env.BARQ_RELAY !== "0") {
-      try { url = await relayEndpoint(endpoint.ws, { timeoutMs: allowTimeoutMs }); }
+      try { url = relay = await relayEndpoint(endpoint.ws, { timeoutMs: allowTimeoutMs }); }
       catch (e) {
         if (e.code === "RELAY_TIMEOUT") throw slow();
         if (e.code === "RELAY_REFUSED") throw new Error(`${endpoint.name} didn't allow the connection (${e.message}). Click "Allow" when it asks, then retry.`);
       }
     }
+    // Parked tabs live in one relay process; a relay started since (the browser restarted) never
+    // had them, and an older one would refuse the address.
+    const claiming = relay && claim?.relay === relay;
+    if (claiming) url = `${relay}?claim=${encodeURIComponent(claim.key)}`;
     let browser;
     try {
       // noDefaults: without it, attaching applies automation defaults (focus emulation, forced
@@ -274,7 +279,76 @@ export class AttachedBrowser {
       if (/timeout/i.test(String(e.message))) throw slow();
       throw e;
     }
-    return new AttachedBrowser(browser, endpoint, { placement, group, size });
+    const b = new AttachedBrowser(browser, endpoint, { placement, group, size });
+    if (relay) {
+      b.relay = relay;
+      // a relay from an older barq passes the question on to the browser, which doesn't know it
+      b.cdp = browser.newBrowserCDPSession();
+      b.canPark = await b.cdp.then(s => s.send("Relay.getVersion")).then(v => !!v?.park, () => false);
+      // up and holding them: until now the relay keeps them parked, in case this never got this far
+      if (claiming) await (await b.cdp).send("Relay.claimed").catch(() => {});
+    }
+    return b;
+  }
+
+  // What to do after a while without calls. Letting go of the browser lets the relay, and with it
+  // the browser's automation bar, go once no agent needs it. Parked, the tabs stay open and the
+  // next call carries on in them; a relay that can't park would close them, so the connection is
+  // kept instead. Straight to the browser, with no relay, every tab of the user's reports to this
+  // process while connected, so that connection is let go even though its tabs close.
+  get idle() { return this.canPark ? "park" : this.relay ? "keep" : "release"; }
+
+  // Leave the browser but keep the agent's tabs: the relay holds them until connect() is given
+  // what this returns. The pages this process had are gone from it; claimed() finds them again.
+  async park() {
+    const { key, keptMs } = await (await this.cdp).send("Relay.park");
+    await this.browser.close().catch(() => {});
+    return { relay: this.relay, key, until: Date.now() + keptMs };
+  }
+
+  async targetInfo(page) {
+    const s = await this.context.newCDPSession(page);
+    try { return (await s.send("Target.getTargetInfo")).targetInfo; } finally { await s.detach().catch(() => {}); }
+  }
+
+  // The tabs this process parked, back in its hands after connecting with the claim, in the order
+  // given, followed by any opened from them in the meantime (the user following a link). Tabs
+  // closed since are left out. The browser is asked about each page once, however many sessions
+  // come back for theirs; a page that appeared since the last claim (opened from a tab still
+  // parked) is asked about when it is first seen.
+  async claimed(targetIds, { isolated = false } = {}) {
+    this.index ??= new Map();
+    this.indexed ??= new WeakSet();
+    for (const p of this.browser.contexts().flatMap(c => c.pages())) {
+      if (this.indexed.has(p) || this.owned.has(p)) continue;
+      this.indexed.add(p);
+      const info = await this.targetInfo(p).catch(() => null);
+      if (info) this.index.set(info.targetId, { page: p, info });
+    }
+    const ids = [...targetIds];
+    for (let grew = true; grew;) {
+      grew = false;
+      for (const [id, { info }] of this.index) if (!ids.includes(id) && ids.includes(info.openerId)) { ids.push(id); grew = true; }
+    }
+    const pages = [];
+    for (const id of ids) {
+      const hit = this.index.get(id);
+      if (!hit || hit.page.isClosed() || this.owned.has(hit.page)) continue;
+      this.index.delete(id);
+      pages.push({ id, page: await this.own(hit.page), context: hit.info.browserContextId });
+    }
+    // a private context goes once the last of its tabs has, as if they had been opened this time
+    if (isolated) {
+      const cdp = await (this.cdp ??= this.browser.newBrowserCDPSession());
+      for (const context of new Set(pages.map(x => x.context))) {
+        const open = new Set(pages.filter(x => x.context === context).map(x => x.page));
+        for (const page of open) page.once("close", () => {
+          open.delete(page);
+          if (!open.size) cdp.send("Target.disposeBrowserContext", { browserContextId: context }).catch(() => {});
+        });
+      }
+    }
+    return pages;
   }
 
   constructor(browser, endpoint, { placement = "auto", group = {}, size = { width: 1280, height: 800 } } = {}) {
@@ -434,7 +508,9 @@ export class AttachedBrowser {
   async isolatedTab() {
     this.cdp ??= this.browser.newBrowserCDPSession();
     const cdp = await this.cdp;
-    const { browserContextId } = await cdp.send("Target.createBrowserContext", { disposeOnDetach: true });
+    // A relay that parks disposes of it when the tab is really done with; otherwise it goes when
+    // this connection does.
+    const { browserContextId } = await cdp.send("Target.createBrowserContext", { disposeOnDetach: !this.canPark });
     const marker = `#jev-${Math.random().toString(36).slice(2, 10)}`;
     const tries = [{ newWindow: true, focus: false, background: true, ...this.size }, { background: true }];
     let targetId, lastError;

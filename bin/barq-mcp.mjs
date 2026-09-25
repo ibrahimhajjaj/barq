@@ -26,13 +26,14 @@ import { stepEnvelope } from "../src/envelope.mjs";
 import { FIELDISH } from "../src/page-model.mjs";
 
 const config = browserConfig();
-// Attached to the user's own browser, let go of it after a while without calls: while connected,
-// every one of their tabs reports to this process.
+// Attached to the user's own browser, let go of it after a while without calls, so the browser's
+// automation bar can go once no agent needs it. The sessions' tabs are parked meanwhile and the
+// next call carries on in them (see AttachedBrowser.idle).
 const idleMin = Number(process.env.BARQ_IDLE_MIN ?? (config.kind === "attach" ? 15 : 0));
 // A tool call gives up after 60 s. The browser's "Allow" prompt can take longer than that to be
 // answered, so the connection gives up first, with a message that says to click it; the prompt
 // stays up and the next call finds the connection ready.
-const pool = new SessionPool({ open: () => openBrowser({ ...config, allowTimeoutMs: 45_000 }), highlight: config.kind === "launch" && config.headed, idleMs: idleMin * 60_000, recipes: new RecipeBook() });
+const pool = new SessionPool({ open: (extra = {}) => openBrowser({ ...config, allowTimeoutMs: 45_000, ...extra }), highlight: config.kind === "launch" && config.headed, idleMs: idleMin * 60_000, recipes: new RecipeBook() });
 
 const text = value => ({ content: [{ type: "text", text: typeof value === "string" ? value : JSON.stringify(value, null, 1) }] });
 const fail = e => ({ isError: true, content: [{ type: "text", text: String(e?.message ?? e).split("\n", 1)[0] }] });
@@ -334,7 +335,7 @@ server.registerTool("browser_scan_status", {
 server.registerTool("browser_sessions", {
   title: "List sessions",
   annotations: { readOnlyHint: true, openWorldHint: false },
-  description: "The open browser sessions, their current URLs and whether a call is running in each.",
+  description: "The browser sessions, their URLs, whether a call is running in each, and the state of each one's tab: open; parked (barq let go of the browser while idle, and the next call carries on in the same tab); gone (closed or lost: the next call opens the URL again in a new tab, so anything typed or signed in there is lost); none (no call yet).",
   inputSchema: {},
 }, async () => text({ sessions: pool.list() }));
 

@@ -13,6 +13,7 @@ import { chromium } from "playwright";
 import { WebSocket } from "ws";   // node 20 has no global one
 import { findEndpoint, userDataDir, inspectPage, readActivePort, projectLabel, browserConfig, AttachedBrowser, ownBrowser, ownProfileDir, remoteDebuggingEnabled, HELPER_EXTENSION_ID, HELPER_VERSION } from "../src/browsers.mjs";
 import { Barq } from "../src/session.mjs";
+import { SessionPool } from "../src/pool.mjs";
 
 const sleep = ms => new Promise(done => setTimeout(done, ms));
 const EXTENSION = join(dirname(fileURLToPath(import.meta.url)), "..", "extension");
@@ -431,4 +432,81 @@ test("attached: an isolated session gets cookies of its own, apart from the user
     await apart.close();
     await host.dispose();
   } finally { await chrome.stop(); }
+});
+
+test("attached and idle: the sessions' tabs are parked, and the next call carries on in them", async () => {
+  const chrome = await startBrowser();
+  const pool = new SessionPool({ open: (extra = {}) => AttachedBrowser.connect(chrome.dir, { placement: "tab", ...extra }) });
+  try {
+    await pool.run("a", async jb => { await jb.open(`${base}/`); await jb.page.evaluate(() => { window.typed = "half a form"; }); });
+    await pool.isolate("b");
+    await pool.run("b", async jb => { await jb.open(`${base}/`); await jb.page.evaluate(() => { document.cookie = "who=b; path=/"; }); });
+    assert.deepEqual(pool.list().map(s => s.tab), ["open", "open"]);
+    await pool.rest();
+    assert.deepEqual(pool.list().map(s => s.tab), ["parked", "parked"]);
+    assert.equal((await fetchTargets(chrome.dir)).filter(t => t.type === "page" && t.url.startsWith(base)).length, 2, "both tabs stay open");
+    const a = await pool.run("a", jb => jb.page.evaluate(() => window.typed));
+    assert.deepEqual(a, { result: "half a form", recovered: false });
+    const b = await pool.run("b", jb => jb.page.evaluate(() => document.cookie));
+    assert.deepEqual(b, { result: "who=b", recovered: false }, "an isolated session keeps its own cookies");
+    assert.deepEqual(pool.list().map(s => s.tab), ["open", "open"]);
+    // closing a session whose tab is parked closes the tab
+    await pool.rest();
+    await pool.close("b");
+    assert.equal((await until(async () => (await fetchTargets(chrome.dir)).filter(t => t.type === "page" && t.url.startsWith(base)).length === 1 || null)), true);
+    // a tab closed from outside is reported gone, and the next call reopens its page
+    await pool.run("a", jb => jb.page.close());
+    assert.equal(pool.list()[0].tab, "gone");
+    const again = await pool.run("a", jb => jb.page.url());
+    assert.deepEqual(again, { result: `${base}/`, recovered: true });
+  } finally { await pool.closeAll().catch(() => {}); await chrome.stop(); }
+});
+
+test("attached and idle: a session's popup is parked with it, and turning a parked session private starts it clean", async () => {
+  const chrome = await startBrowser();
+  const pool = new SessionPool({ open: (extra = {}) => AttachedBrowser.connect(chrome.dir, { placement: "tab", ...extra }) });
+  const agentTabs = async () => (await fetchTargets(chrome.dir)).filter(t => t.type === "page" && t.url.startsWith(base)).map(t => t.title).sort();
+  try {
+    // a sign-in popup the session is working in, over the page that opened it
+    await pool.run("a", async jb => { await jb.open(`${base}/`); await jb.page.click("#l"); await until(() => jb.page.url().endsWith("/popup")); });
+    await pool.run("c", async jb => { await jb.open(`${base}/`); await jb.page.evaluate(() => { document.cookie = "who=shared; path=/"; }); });
+    await pool.rest();
+    assert.deepEqual(await agentTabs(), ["agent", "agent", "popup"]);
+    const a = await pool.run("a", jb => [jb.pages.length, jb.page.url()]);
+    assert.deepEqual(a.result, [2, `${base}/popup`], "both tabs back, still on the popup");
+    await pool.rest();
+    // closing races with parking: it waits, and the tab is closed, not parked for nobody
+    const [, closed] = await Promise.all([pool.rest(), pool.close("a")]);
+    assert.equal(closed, true);
+    assert.deepEqual(await until(async () => (await agentTabs()).length === 1 && await agentTabs()), ["agent"]);
+    // a parked shared-profile tab is closed, not reused, when the session turns private
+    await pool.isolate("c");
+    const c = await pool.run("c", async jb => { await jb.open(`${base}/`); return jb.page.evaluate(() => document.cookie); });
+    assert.equal(c.result, "");
+  } finally { await pool.closeAll().catch(() => {}); await chrome.stop(); }
+});
+
+test("attached and idle: a tab opened from a parked one joins its session, and an isolated popup closes alone", async () => {
+  const chrome = await startBrowser();
+  const pool = new SessionPool({ open: (extra = {}) => AttachedBrowser.connect(chrome.dir, { placement: "tab", ...extra }) });
+  try {
+    await pool.run("e", async jb => { await jb.open(`${base}/`); await jb.page.evaluate(() => { window.name = "e-tab"; }); });
+    await pool.isolate("d");
+    await pool.run("d", async jb => { await jb.open(`${base}/`); await jb.page.click("#l"); await until(() => jb.page.url().endsWith("/popup")); });
+    await pool.rest();
+    // the user follows the link in the parked tab of "e"
+    const user = await chromium.connectOverCDP((await findEndpoint(chrome.dir)).ws, { noDefaults: true });
+    const tabs = user.contexts().flatMap(c => c.pages());
+    const parked = (await Promise.all(tabs.map(async p => [p, await p.evaluate(() => window.name).catch(() => "")]))).find(([, name]) => name === "e-tab")?.[0];
+    // a background tab doesn't render; the user would have brought it to the front
+    await (await parked.context().newCDPSession(parked)).send("Emulation.setFocusEmulationEnabled", { enabled: true });
+    await parked.click("#l");
+    await until(async () => (await fetchTargets(chrome.dir)).filter(t => t.url.endsWith("/popup")).length === 2);
+    await user.close();
+    const e = await pool.run("e", jb => jb.pages.map(p => new URL(p.url()).pathname).sort());
+    assert.deepEqual(e.result, ["/", "/popup"], "the tab the user opened is the session's");
+    // closing the private session's popup leaves the page that opened it
+    const d = await pool.run("d", async jb => { const root = jb.pages.find(p => new URL(p.url()).pathname === "/"); await jb.page.close(); await sleep(500); return root.isClosed(); });
+    assert.equal(d.result, false);
+  } finally { await pool.closeAll().catch(() => {}); await chrome.stop(); }
 });

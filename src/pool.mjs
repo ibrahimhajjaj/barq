@@ -28,6 +28,8 @@ export class SessionPool {
 
   // One browser for all sessions. Callers that find it dead at the same moment share one reopen.
   async browser() {
+    // a call that comes while the tabs are being parked waits for the claim that gets them back
+    await this.resting;
     const cur = this.handle;
     if (cur) {
       const h = await cur.catch(() => null);
@@ -36,15 +38,20 @@ export class SessionPool {
       this.handle = null;
       h?.dispose().catch(() => {});
     }
-    const next = this.open();
+    // the tabs left parked last time come back with the connection, once
+    const claim = this.claim;
+    this.claim = null;
+    const next = this.open(claim ? { claim } : {});
     this.handle = next;
-    next.catch(() => { if (this.handle === next) this.handle = null; });
+    // a connection that failed never took them: the next try asks again
+    next.catch(() => { if (this.handle === next) this.handle = null; if (claim && !this.claim) this.claim = claim; });
     return next;
   }
 
   entry(name) {
     let s = this.sessions.get(name);
-    if (!s) this.sessions.set(name, s = { name, jb: null, host: null, hadTab: false, lastUrl: null, queue: Promise.resolve(), busy: false, closed: false, stray: null, isolated: false });
+    // parked: { ids, current, until } while the session's tabs wait in the relay for this process
+    if (!s) this.sessions.set(name, s = { name, jb: null, host: null, hadTab: false, lastUrl: null, parked: null, queue: Promise.resolve(), busy: false, closed: false, stray: null, isolated: false });
     return s;
   }
 
@@ -54,9 +61,13 @@ export class SessionPool {
     const s = this.entry(name);
     // after whatever the session is doing now, never under it
     const turn = s.queue.then(async () => {
+      await this.resting;
       if (s.isolated) return;
+      // a parked tab is the shared profile's: closed as one, before the session changes
+      const had = s.jb || s.parked;
+      await this.dropParked(s);
       s.isolated = true;
-      if (s.jb) { await this.discard(s); s.hadTab = false; s.lastUrl = null; }
+      if (had) { await this.discard(s); s.hadTab = false; s.lastUrl = null; }
     });
     s.queue = turn.catch(() => {});
     return turn;
@@ -123,6 +134,20 @@ export class SessionPool {
     // a tab can die quietly (a crashed renderer doesn't always say so): ask it something before
     // handing it to the next call
     if (s.jb && s.host === host && await this.responsive(s)) return false;
+    // the tabs it had before the browser was let go of while idle, as the last call left them
+    if (!s.jb && s.parked) {
+      const { ids, current } = s.parked;
+      s.parked = null;
+      const pages = await host.claimed?.(ids, { isolated: s.isolated }).catch(() => []) ?? [];
+      if (pages.length) {
+        const [first, ...more] = pages;
+        s.jb = await Barq.forPage(first.page, { highlight: this.highlight, front: host.front ? p => host.front(p) : null, visible: !!host.visible, recipes: this.recipes });
+        for (const { page } of more) await s.jb.adopt(page);
+        s.jb.page = pages.find(x => x.id === current)?.page ?? first.page;
+        s.host = host;
+        return false;
+      }
+    }
     const replacing = s.hadTab;
     await this.discard(s);
     const page = await host.newTab({ session: s.name, isolated: s.isolated });
@@ -138,20 +163,41 @@ export class SessionPool {
     if (jb) await jb.close().catch(() => {});
   }
 
+  // tab: "open"; "parked" while the browser is let go of for being idle (the next call carries on
+  // in it); "gone" when it was closed or lost (the next call opens `url` again in a new one); "none"
+  // before the first call.
   list() {
-    return [...this.sessions.values()].map(s => ({ session: s.name, url: s.jb && !s.jb.page.isClosed() ? s.jb.page.url() : s.lastUrl, busy: s.busy }));
+    return [...this.sessions.values()].map(s => {
+      const open = s.jb && !s.jb.page.isClosed() && s.host?.isAlive?.() !== false;
+      const tab = open ? "open" : s.parked && s.parked.until > Date.now() ? "parked" : s.hadTab || s.parked ? "gone" : "none";
+      return { session: s.name, url: open ? s.jb.page.url() : s.lastUrl, tab, busy: s.busy };
+    });
   }
 
   // Closes the session's tab now, stopping a call that is running in it. Calls already queued on it
   // fail; the next call with this name starts a new session.
   async close(name = "main") {
+    // not halfway through parking, which could file its tab away after this has looked
+    await this.resting;
     const s = this.sessions.get(name);
     if (!s) return false;
     this.sessions.delete(name);
     s.closed = true;
     s.abort?.abort();
     await this.discard(s);
+    await this.dropParked(s);
     return true;
+  }
+
+  // A parked tab can only be closed by taking it back first, which takes back all of this
+  // process's parked tabs; the others stay listed as parked and are picked up by their next call.
+  async dropParked(s) {
+    if (!s.parked) return;
+    const { ids } = s.parked;
+    s.parked = null;
+    const host = await this.browser().catch(() => null);
+    for (const { page } of await host?.claimed?.(ids, { isolated: s.isolated }).catch(() => []) ?? []) await page.close().catch(() => {});
+    this.touch();
   }
 
   async closeAll() {
@@ -168,6 +214,44 @@ export class SessionPool {
     await h?.dispose();
   }
 
+  // Let go of the browser after a while without calls, in the way the browser allows: tabs parked
+  // in the relay, or kept by staying connected, or closed along with the connection.
+  rest() {
+    this.resting ??= this.park().finally(() => { this.resting = null; });
+    return this.resting;
+  }
+
+  async park() {
+    const h = this.handle && await this.handle.catch(() => null);
+    if (!h) return;
+    if (h.idle === "keep") return;
+    if (h.idle !== "park") return this.release();
+    this.handle = null;
+    for (const s of this.sessions.values()) {
+      const jb = s.jb;
+      s.jb = null;
+      if (!jb || jb.page.isClosed()) continue;
+      const ids = [];
+      let current = null;
+      for (const p of jb.pages) {
+        if (p.isClosed()) continue;
+        const id = (await h.targetInfo(p).catch(() => null))?.targetId;
+        if (!id) continue;
+        ids.push(id);
+        if (p === jb.page) current = id;
+      }
+      if (ids.length) s.parked = { ids, current, until: Infinity };
+    }
+    try {
+      this.claim = await h.park();
+      // tabs still parked from before were taken back with the connection and go back with it
+      for (const s of this.sessions.values()) if (s.parked) s.parked.until = this.claim.until;
+    } catch {
+      for (const s of this.sessions.values()) s.parked = null;
+      await h.dispose().catch(() => {});
+    }
+  }
+
   // Keep the browser while some work outside the sessions runs; returns the function that lets go.
   hold() {
     this.holds++;
@@ -180,7 +264,7 @@ export class SessionPool {
     clearTimeout(this.idleTimer);
     this.idleTimer = setTimeout(() => {
       if (this.holds || [...this.sessions.values()].some(s => s.busy)) return this.touch();
-      this.release().catch(() => {});
+      this.rest().catch(() => {});
     }, this.idleMs);
     this.idleTimer.unref?.();
   }
