@@ -1,27 +1,28 @@
-# A tag named after the version puts that version on npm. To release: npm version patch, then git push --follow-tags.
-# npm trusts this workflow directly (OIDC), so GitHub holds no npm token. Set up once with:
-#   npx npm@latest trust github barq-mcp --file release.yml --repo ibrahimhajjaj/barq --allow-publish
+# A version tag runs the tests and makes the GitHub release. Publishing to npm happens by hand, from a
+# machine behind the owner's two-factor login, so nothing in this repository can publish.
+#
+# The actions are pinned to commits, since a version tag on an action can be moved.
 name: Release
 
 on:
   push:
     tags: ["v*"]
 
-permissions:
-  contents: write   # for the GitHub release
-  id-token: write   # for publishing without a token, and provenance
+permissions: {}
 
 jobs:
-  publish:
+  test:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-node@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1   # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020   # v7.0.0
         with:
           node-version: 22
-          registry-url: "https://registry.npmjs.org"
           cache: npm
-      - run: npm install --global npm@latest   # publishing without a token needs npm 11.5.1 or later
       - run: npm ci
       - run: npx playwright install chromium --with-deps
       - run: npm test
@@ -29,11 +30,14 @@ jobs:
         run: |
           V=$(node -e 'console.log(require("./package.json").version)')
           if [ "${GITHUB_REF_NAME#v}" != "$V" ]; then echo "$GITHUB_REF_NAME is not v$V, the version in package.json"; exit 1; fi
-      - name: Publish to npm
-        run: |
-          V=$(node -e 'console.log(require("./package.json").version)')
-          if npm view "barq-mcp@$V" version >/dev/null 2>&1; then echo "barq-mcp@$V is already on npm, skipping"; else npm publish --access public; fi
+
+  release:
+    needs: test
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write   # for the GitHub release
+    steps:
       - name: GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release view "$GITHUB_REF_NAME" > /dev/null 2>&1 || gh release create "$GITHUB_REF_NAME" --verify-tag --generate-notes
+        run: gh release view "$GITHUB_REF_NAME" -R "$GITHUB_REPOSITORY" > /dev/null 2>&1 || gh release create "$GITHUB_REF_NAME" -R "$GITHUB_REPOSITORY" --verify-tag --generate-notes
