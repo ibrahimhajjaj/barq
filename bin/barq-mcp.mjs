@@ -88,7 +88,7 @@ function tool(fn, timeoutMs = 60_000) {
   };
 }
 
-const server = new McpServer({ name: "barq", version: "0.2.4" }, {
+const server = new McpServer({ name: "barq", version: "0.2.5" }, {
   instructions: [
     "barq drives a browser with a fast decision model choosing each click, so you read results, not pages.",
     "Work in outcomes: browser_open, then one browser_do per outcome (\"Log in\", \"Fill in the sign-up form and submit it\"), with every value to type or pick in `values`. A whole form is one browser_do.",
