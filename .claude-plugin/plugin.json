@@ -1,6 +1,6 @@
 {
   "name": "barq",
-  "version": "0.2.5",
+  "version": "0.2.6",
   "description": "Fast browser hands for coding agents: name an outcome, and Jev (TypeSafe's decision model) picks each click in about 300 ms. Works in a browser it launches or in your own Chrome or Edge, with your logins, and keeps passwords out of the chat.",
   "author": {
     "name": "Ibrahim Hajjaj",
